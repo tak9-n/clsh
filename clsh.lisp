@@ -9,6 +9,8 @@
 
 (in-package :clsh)
 
+(defconstant +history-file+ (merge-pathnames (user-homedir-pathname) #p".clsh_history"))
+
 ;;; Let's also create a custom command and bind it to some key sequence so
 ;;; user can invoke it. In this example user can automagically insert phrase
 ;;; 'inserted text' pressing Control-o.
@@ -36,6 +38,7 @@
     (do-external-symbols
         (pkg package pkgs)
       (push pkg pkgs))))
+
 #+sbcl
 (defun run-program-wait (cmd args)
   (let* ((os (make-string-output-stream))
@@ -84,9 +87,23 @@
 
 (rl:register-function :complete #'complete-all-symbols)
 
-;;; Finally, this is our main function. To exit from the loop, enter 'quit'.
+(defvar *clsh-history-path* #P"~/.clsh_history")
+(defvar *readline-name* "clsh")
+
+(defun add-history (text)
+  (cffi:foreign-funcall "add_history" :string text :void))
+
+(defun read-history ()
+  (cffi:foreign-funcall "read_history" :string (namestring +history-file+) :int))
+(defun write-history ()
+  (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
+
+(defun clsh-exit ()
+  (write-history)
+  (sb-ext:exit))
 
 (defun run ()
+  (read-history)
   (do ((i 0 (1+ i))
        (text ""))
       (nil)
