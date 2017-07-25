@@ -5,7 +5,8 @@
 (cl:defpackage :clsh
   (:use    #:common-lisp
            #:alexandria)
-  (:export #:run))
+  (:export #:run
+           #:clsh-exit))
 
 (in-package :clsh)
 
@@ -90,17 +91,29 @@
 (defvar *clsh-history-path* #P"~/.clsh_history")
 (defvar *readline-name* "clsh")
 
+;no entry in cl-readline
 (defun add-history (text)
   (cffi:foreign-funcall "add_history" :string text :void))
-
 (defun read-history ()
   (cffi:foreign-funcall "read_history" :string (namestring +history-file+) :int))
 (defun write-history ()
   (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
 
+;TODO this should be registered function as internal command
 (defun clsh-exit ()
   (write-history)
+  #+sbcl
   (sb-ext:exit))
+(defun clsh-cd (dir)
+  #+sbcl
+  (sb-posix:chdir dir))
+
+(defun cmdline-execute (line)
+  (let* ((cmds (ppcre:split "[ 	]+" line))
+         (func-sym (find-symbol (concatenate 'string "CLSH-" (string-upcase (car cmds))) 'clsh)))
+    (if (fboundp func-sym)
+        (apply func-sym (cdr cmds))
+        (princ (run-program-wait (car cmds) (cdr cmds))))))
 
 (defun run ()
   (read-history)
@@ -115,5 +128,4 @@
           ((ppcre:scan "^[ 	]*\\(" text)
            (format t "~s~%" (eval (read-from-string text))))
           (t
-           (let ((cmds (ppcre:split "[ 	]+" text)))
-             (princ (run-program-wait (car cmds) (cdr cmds))))))))
+           (cmdline-execute text)))))
