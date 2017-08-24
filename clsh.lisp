@@ -88,7 +88,6 @@
 
 (rl:register-function :complete #'complete-all-symbols)
 
-(defvar *clsh-history-path* #P"~/.clsh_history")
 (defvar *readline-name* "clsh")
 
 ;no entry in cl-readline
