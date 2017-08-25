@@ -6,7 +6,8 @@
   (:use    #:common-lisp
            #:alexandria)
   (:export #:run
-           #:clsh-exit))
+           #:clsh-exit
+           #:rd))
 
 (in-package :clsh)
 
@@ -40,15 +41,17 @@
         (pkg package pkgs)
       (push pkg pkgs))))
 
+;TODO パイプ処理については検討が必要
 #+sbcl
-(defun run-program-wait (cmd args)
+(defun run-program-wait (cmd args &key (input nil))
   (let* ((os (make-string-output-stream))
-         (proc (sb-ext:run-program cmd args :wait nil :search t :output os)))
+         (proc (sb-ext:run-program cmd args :wait nil :search t :output os :input input)))
     (sb-ext:process-wait proc t)
     (values (get-output-stream-string os) (sb-ext:process-exit-code proc))))
 #+sbcl
-(defun run-program-no-wait (cmd args)
-  (sb-ext:run-program cmd args :wait nil :search t :output :stream))
+(defun run-program-no-wait (cmd args &key (input nil))
+  (sb-ext:run-program cmd args :wait nil :search t :output :stream :input input))
+(defvar *command-standard-input* nil)
 
 (set-macro-character #\] (get-macro-character #\)))
 (set-dispatch-macro-character #\# #\[
@@ -57,9 +60,17 @@
     (setf (readtable-case *readtable*) :preserve)
     (unwind-protect
          (let ((command-line (read-delimited-list #\] stream t)))
-           (list 'run-program-wait (princ-to-string (car command-line))
-                 `',(mapcar #'princ-to-string (rest command-line))))
+           (list 'run-program-no-wait (princ-to-string (car command-line))
+                 `',(mapcar #'princ-to-string (rest command-line))
+                 ':input '*command-standard-input*))
       (setf (readtable-case *readtable*) :upcase))))
+
+(defmacro rd (&rest body)
+  (cons 'progn
+        (append (mapcar (lambda (x)
+                          `(setf *command-standard-input* ,x))
+                        body)
+                '((setf *command-standard-input* nil)))))
 
 ;;; Define and register function that does custom completion: if user enters
 ;;; first word, it will be completed as a verb, second and later words will
@@ -90,6 +101,7 @@
 
 (defvar *readline-name* "clsh")
 
+;TODO should send adding request to cl-readline
 ;no entry in cl-readline
 (defun add-history (text)
   (cffi:foreign-funcall "add_history" :string text :void))
@@ -98,7 +110,7 @@
 (defun write-history ()
   (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
 
-;TODO this should be registered function as internal command
+;TODO using another name space might be better.
 (defun clsh-exit ()
   (write-history)
   #+sbcl
@@ -107,9 +119,12 @@
   #+sbcl
   (sb-posix:chdir dir))
 
+(defun find-internal-define (cmds)
+  (find-symbol (concatenate 'string "CLSH-" (string-upcase (car cmds))) 'clsh))
+
 (defun cmdline-execute (line)
   (let* ((cmds (ppcre:split "[ 	]+" line))
-         (func-sym (find-symbol (concatenate 'string "CLSH-" (string-upcase (car cmds))) 'clsh)))
+         (func-sym (find-internal-define cmds)))
     (if (fboundp func-sym)
         (apply func-sym (cdr cmds))
         (princ (run-program-wait (car cmds) (cdr cmds))))))
@@ -123,8 +138,12 @@
           (rl:readline :prompt (format nil "~a:[~a]> " (package-name *package*) i)
                        :add-history t
                        :novelty-check #'novelty-check))
-    (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
-          ((ppcre:scan "^[ 	]*\\(" text)
-           (format t "~s~%" (eval (read-from-string text))))
-          (t
-           (cmdline-execute text)))))
+
+    (handler-case
+        (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
+              ((ppcre:scan "^[ 	]*\\(" text)
+               (eval (read-from-string text))
+               (fresh-line))
+              (t
+               (cmdline-execute text)))
+      (error (c) (format *error-output* "~a~%" c)))))
