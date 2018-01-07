@@ -4,13 +4,11 @@
 
 (load #P"jobs.lisp")
 
-(cl:defpackage clsh
-  (:use    #:common-lisp
-           #:alexandria
-           #:clsh-jobs)
-  (:export #:run
-           #:clsh-exit
-           #:rd))
+(defpackage clsh
+  (:use    common-lisp
+           alexandria
+           clsh-jobs)
+  (:export run))
 
 (in-package :clsh)
 
@@ -104,18 +102,7 @@
 
                                         ;TODO using another name space might be better.
 (defun find-internal-define (cmds)
-  (find-symbol (concatenate 'string "CLSH-" (string-upcase (car cmds))) 'clsh))
-(defun clsh-exit ()
-  (write-history)
-  #+sbcl
-  (sb-ext:exit))
-(defun clsh-cd (dir)
-  #+sbcl
-  (sb-posix:chdir dir))
-(defun clsh-fg (&optional job)
-  (make-active-job (if job job (get-first-job)) t))
-(defun clsh-bg (&optional job)
-  (make-active-job (if job job (get-first-job)) nil))
+  (find-symbol (string-upcase (car cmds)) 'clsh-commands))
 
 (defun cmdline-execute (line)
   (let* ((cmds (ppcre:split "[ 	]+" line))
@@ -140,6 +127,9 @@
                  (eval (read-from-string text))
                  (fresh-line))
                 (t
-                 (cmdline-execute text))))
+                 (cmdline-execute text)))
+          (pick-finished-jobs))
       (error (c) (format *error-output* "~a~%" c))
       (sb-sys:interactive-interrupt (i) (format *error-output* "~a~%" i)))))
+
+(load #p"commands.lisp")

@@ -1,11 +1,11 @@
 (defpackage clsh-jobs
   (:use common-lisp cffi)
   (:export
-   job-finished
    create-job
    wait-job
-   make-active-job
-   get-first-job))
+   make-job-active
+   get-first-job
+   pick-finished-jobs))
 
 (in-package clsh-jobs)
 
@@ -70,10 +70,6 @@
 (defun delete-done-job (job)
   (setf *jobs* (delete job *jobs*)))
 #+sbcl
-(defun job-finished (job)
-  (setf *last-done-job-status* (multiple-value-bind (pid status) (sb-posix:waitpid job sb-posix:wnohang) (declare (ignore pid)) status))
-  (delete-done-job job))
-#+sbcl
 (defun create-job (cmd args input output)
   (let ((proc (run-program cmd args :output output :input input)))
     (push proc *jobs*)
@@ -87,6 +83,12 @@
                  (format nil "status=~d" status)))))
 
 #+sbcl
+(defun pick-finished-job (job)
+  (multiple-value-bind (pid status) (sb-posix:waitpid job sb-posix:wnohang)
+    (when (and (eq pid job) (sb-posix:wifexited status))
+      (show-status-message job status)
+      (delete-done-job job))))
+#+sbcl
 (defun wait-job (job)
   (unless (eq *current-job* (sb-posix:getpid))
     (tcsetpgrp *tty-fd* job)
@@ -94,11 +96,12 @@
   (multiple-value-bind (pid status) (sb-posix:waitpid job sb-posix:wuntraced)
     (declare (ignore pid))
     (tcsetpgrp *tty-fd* *clsh-pgid*)
-    (unless (sb-posix:wifstopped status)
-      (setf *last-done-job-status* status)
-      (delete-done-job job))
-    (setf *current-job* nil)
-    (show-status-message job status)))
+    (if (sb-posix:wifexited status)
+        (progn
+          (setf *last-done-job-status* status)
+          (delete-done-job job))
+        (show-status-message job status))
+    (setf *current-job* nil)))
 #+SBCL
 (defun send-signal-to-job (job sig-no)
   (sb-posix:killpg job sig-no)
@@ -106,10 +109,16 @@
     (setf jobs (delete job jobs))
     (push job jobs)
     (setf *jobs* jobs)))
-(defun make-active-job (job forground)
+(defun make-job-active (job foreground)
   (let ((target (if job job (car *jobs*))))
     (send-signal-to-job target
                         sb-posix:sigcont)
-    (when forground (wait-job target))))
+    (if foreground
+        (wait-job target)
+        (show-status-message job -1))))
 (defun get-first-job ()
   (car *jobs*))
+(defun pick-finished-jobs ()
+  (mapc (lambda (job)
+          (pick-finished-job job))
+        *jobs*))
