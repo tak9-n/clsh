@@ -9,6 +9,11 @@
 
 (in-package clsh-jobs)
 
+(defvar *clsh-pgid* (sb-posix:getpgrp))
+(defvar *jobs* nil)
+(defvar *last-done-job-status* nil)
+(defvar *current-job* nil)
+
 (sb-sys:ignore-interrupt sb-posix:sigttou)
 (sb-sys:ignore-interrupt sb-posix:sigttin)
 (sb-sys:ignore-interrupt sb-posix:sigtstp)
@@ -47,6 +52,7 @@
     (if (eq pid 0)
         (progn ;child
           (sb-posix:setpgrp)
+          (tcsetpgrp *tty-fd* pid)
           (sb-sys:default-interrupt sb-posix:sigtstp)
           (sb-sys:default-interrupt sb-posix:sigttou)
           (sb-sys:default-interrupt sb-posix:sigttin)
@@ -58,31 +64,41 @@
           (exec cmd args))
         (progn ;parent
           (sb-posix:setpgid pid pid)
+          (setf *current-job* pid)
           pid))))
 
-(defvar *clsh-pgid* (sb-posix:getpgrp))
-(defvar *jobs* nil)
-(defvar *last-done-job-status* nil)
-(defvar *currnet-job* nil)
+(defun delete-done-job (job)
+  (setf *jobs* (delete job *jobs*)))
 #+sbcl
 (defun job-finished (job)
   (setf *last-done-job-status* (multiple-value-bind (pid status) (sb-posix:waitpid job sb-posix:wnohang) (declare (ignore pid)) status))
-  (setf *jobs* (delete job *jobs*)))
+  (delete-done-job job))
 #+sbcl
 (defun create-job (cmd args input output)
   (let ((proc (run-program cmd args :output output :input input)))
     (push proc *jobs*)
     proc))
-(defvar *debug-job* 1)
+(defun show-status-message (job status)
+  (format t "[~d] ~d~%"
+          job
+          (cond ((sb-posix:wifstopped status)
+                 "stopped")
+                (t
+                 (format nil "status=~d" status)))))
+
 #+sbcl
 (defun wait-job (job)
-  (tcsetpgrp *tty-fd* job)
-  (setf *currnet-job* job)
-  (setf *last-done-job-status* (multiple-value-bind (pid status) (sb-posix:waitpid job sb-posix:wuntraced) (declare (ignore pid)) status))
-  (setf *debug-job* 2)
-  (setf *currnet-job* nil)
-  (tcsetpgrp *tty-fd* *clsh-pgid*)
-  (setf *debug-job* 3))
+  (unless (eq *current-job* (sb-posix:getpid))
+    (tcsetpgrp *tty-fd* job)
+    (setf *current-job* job))
+  (multiple-value-bind (pid status) (sb-posix:waitpid job sb-posix:wuntraced)
+    (declare (ignore pid))
+    (tcsetpgrp *tty-fd* *clsh-pgid*)
+    (unless (sb-posix:wifstopped status)
+      (setf *last-done-job-status* status)
+      (delete-done-job job))
+    (setf *current-job* nil)
+    (show-status-message job status)))
 #+SBCL
 (defun send-signal-to-job (job sig-no)
   (sb-posix:killpg job sig-no)
