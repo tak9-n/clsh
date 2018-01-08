@@ -2,7 +2,7 @@
   (:use    common-lisp
            clsh
            clsh-jobs)
-  (:export exit cd fg bg))
+  (:export exit cd fg bg jobs))
 
 (in-package clsh-commands)
 
@@ -13,7 +13,9 @@
 (defun cd (dir)
   #+sbcl
   (sb-posix:chdir dir))
-(defun fg (&optional job)
-  (clsh-jobs:make-job-active (if job job (clsh-jobs:get-first-job)) t))
-(defun bg (&optional job)
-  (clsh-jobs:make-job-active (if job job (clsh-jobs:get-first-job)) nil))
+(defun fg (&optional jobno)
+  (clsh-jobs:make-job-active jobno t))
+(defun bg (&optional jobno)
+  (clsh-jobs:make-job-active jobno nil))
+(defun jobs ()
+  (clsh-jobs:show-jobs))

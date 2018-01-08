@@ -38,7 +38,7 @@
          (job (create-job cmd args input os)))
     (wait-job job)
     (get-output-stream-string os)))
-(defun run-program-no-wait (cmd args &key (input nil))
+(defun run-program-no-wait (cmd args &key (input t))
   (create-job cmd args input :stream))
 
 (defvar *command-standard-input* nil)
@@ -101,15 +101,22 @@
   (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
 
                                         ;TODO using another name space might be better.
-(defun find-internal-define (cmds)
-  (find-symbol (string-upcase (car cmds)) 'clsh-commands))
+(defun find-command-symbol (cmds)
+  (multiple-value-bind (sym statsu)
+      (find-symbol (string-upcase (car cmds)) 'clsh-commands )
+    (if (eq statsu :external)
+        sym
+        nil)))
 
 (defun cmdline-execute (line)
-  (let* ((cmds (ppcre:split "[ 	]+" line))
-         (func-sym (find-internal-define cmds)))
-    (if (fboundp func-sym)
-        (apply func-sym (cdr cmds))
-        (princ (run-program-wait (car cmds) (cdr cmds))))))
+  (multiple-value-bind (cmds-str bg-flg) (ppcre:regex-replace "\\s*&\\s*$" line "")
+    (let* ((cmds (ppcre:split "[ 	]+" cmds-str))
+           (func-sym (find-command-symbol cmds)))
+      (if (fboundp func-sym)
+          (apply func-sym (cdr cmds))
+          (if bg-flg
+              (run-program-no-wait (car cmds) (cdr cmds))
+              (princ (run-program-wait (car cmds) (cdr cmds))))))))
 
 (defun run ()
   (read-history)
