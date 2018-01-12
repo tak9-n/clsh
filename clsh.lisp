@@ -108,15 +108,21 @@
         sym
         nil)))
 
+(defun expand-tilda (path-str)
+  (let* ((r1 (ppcre:regex-replace "~(\\w+)" path-str "/home/\\1" :preserve-case t))
+         (r2 (ppcre:regex-replace "~" r1 (namestring (user-homedir-pathname)) :preserve-case t)))
+    r2))
+
 (defun cmdline-execute (line)
   (multiple-value-bind (cmds-str bg-flg) (ppcre:regex-replace "\\s*&\\s*$" line "")
     (let* ((cmds (ppcre:split "[ 	]+" cmds-str))
-           (func-sym (find-command-symbol cmds)))
+           (func-sym (find-command-symbol cmds))
+           (args (mapcar #'expand-tilda (cdr cmds))))
       (if (fboundp func-sym)
-          (apply func-sym (cdr cmds))
+          (apply func-sym args)
           (if bg-flg
-              (run-program-no-wait (car cmds) (cdr cmds))
-              (princ (run-program-wait (car cmds) (cdr cmds))))))))
+              (run-program-no-wait (car cmds) args)
+              (princ (run-program-wait (car cmds) args)))))))
 
 (defun run ()
   (read-history)
