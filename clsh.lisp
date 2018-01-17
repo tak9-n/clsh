@@ -3,7 +3,7 @@
 (require :cl-ppcre)
 
 (load #P"jobs.lisp")
-
+(load #P"cmdline_parser.lisp")
 (defpackage clsh
   (:use    common-lisp
            alexandria
@@ -32,14 +32,13 @@
         (pkg package pkgs)
       (push pkg pkgs))))
 
-                                        ;TODO パイプ処理については検討が必要
-(defun run-program-wait (cmd args &key (input t))
+(defun run-program-wait (cmds &key (input t))
   (let* ((os (make-string-output-stream))
-         (job (create-job cmd args input os)))
+         (job (create-job cmds input os)))
     (wait-job job)
     (get-output-stream-string os)))
-(defun run-program-no-wait (cmd args &key (input t))
-  (create-job cmd args input :stream))
+(defun run-program-no-wait (cmds &key (input t))
+  (create-job cmds input :stream))
 
 (defvar *command-standard-input* nil)
 
@@ -101,28 +100,23 @@
   (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
 
                                         ;TODO using another name space might be better.
-(defun find-command-symbol (cmds)
+(defun find-command-symbol (cmd)
   (multiple-value-bind (sym statsu)
-      (find-symbol (string-upcase (car cmds)) 'clsh-commands )
+      (find-symbol (string-upcase cmd) 'clsh-commands )
     (if (eq statsu :external)
         sym
         nil)))
 
-(defun expand-tilda (path-str)
-  (let* ((r1 (ppcre:regex-replace "~(\\w+)" path-str "/home/\\1" :preserve-case t))
-         (r2 (ppcre:regex-replace "~" r1 (namestring (user-homedir-pathname)) :preserve-case t)))
-    r2))
-
 (defun cmdline-execute (line)
-  (multiple-value-bind (cmds-str bg-flg) (ppcre:regex-replace "\\s*&\\s*$" line "")
-    (let* ((cmds (ppcre:split "[ 	]+" cmds-str))
-           (func-sym (find-command-symbol cmds))
-           (args (mapcar #'expand-tilda (cdr cmds))))
-      (if (fboundp func-sym)
-          (apply func-sym args)
-          (if bg-flg
-              (run-program-no-wait (car cmds) args)
-              (princ (run-program-wait (car cmds) args)))))))
+  (let* ((p (clsh-parser:parse-cmdline line))
+         (cmds (cdr p))
+         (bg-flg (car p))
+         (func-sym (find-command-symbol (caar cmds))))
+    (if (fboundp func-sym)
+        (apply func-sym (cdar cmds))
+        (if bg-flg
+            (run-program-no-wait cmds)
+            (princ (run-program-wait cmds))))))
 
 (defun run ()
   (read-history)

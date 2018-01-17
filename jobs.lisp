@@ -54,8 +54,11 @@
         (sb-posix:close fd)
       (sb-posix:syscall-error (e) (declare (ignore e))))))
 
-(defun run-program (cmd args &key (input t) (output t))
-  (let ((pid (sb-posix:posix-fork)))
+                                        ;TODO パイプ処理については検討が必要
+;;kokokara パイプ処理できるように
+(defun run-programs (cmds &key (input t) (output t))
+  (let ((cmd (car cmds))
+        (pid (sb-posix:posix-fork)))
     (if (eq pid 0)
         (progn ;child
           (sb-posix:setpgrp)
@@ -68,7 +71,7 @@
           ;;   (sb-posix:dup2 input-fd 0)
           ;;   (sb-posix:dup2 output-fd 1))
           (close-all-fd)
-          (exec cmd args))
+          (exec (car cmd) (cdr cmd)))
         (progn ;parent
           (sb-posix:setpgid pid pid)
           (setf *current-job* pid)
@@ -80,10 +83,10 @@
     (setf *jobno-counter* 1)))
 
 #+sbcl
-(defun create-job (cmd args input output)
-  (let* ((pid (run-program cmd args :output output :input input))
+(defun create-job (cmds input output)
+  (let* ((pid (run-programs cmds :output output :input input))
          (proc (make-job :no *jobno-counter*
-                         :commands (cons (cons cmd args) nil)
+                         :commands cmds
                          :pids (cons pid nil)
                          :pgid pid
                          :status 'running)))
