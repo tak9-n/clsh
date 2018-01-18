@@ -1,10 +1,10 @@
-(defpackage clsh-commands
+(defpackage clsh.commands
   (:use    common-lisp
            clsh
-           clsh-jobs)
+           clsh.jobs)
   (:export exit cd fg bg jobs))
 
-(in-package clsh-commands)
+(in-package clsh.commands)
 
 (defun exit ()
   (clsh::write-history)
@@ -14,8 +14,8 @@
   #+sbcl
   (sb-posix:chdir dir))
 (defun fg (&optional jobno)
-  (clsh-jobs:make-job-active jobno t))
+  (clsh.jobs:make-job-active jobno t))
 (defun bg (&optional jobno)
-  (clsh-jobs:make-job-active jobno nil))
+  (clsh.jobs:make-job-active jobno nil))
 (defun jobs ()
-  (clsh-jobs:show-jobs))
+  (clsh.jobs:show-jobs))

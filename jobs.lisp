@@ -1,4 +1,4 @@
-(defpackage clsh-jobs
+(defpackage clsh.jobs
   (:use common-lisp cffi)
   (:export
    create-job
@@ -7,7 +7,7 @@
    pick-finished-jobs
    show-jobs))
 
-(in-package clsh-jobs)
+(in-package clsh.jobs)
 
 (defvar *jobno-counter* 1)
 (defstruct job

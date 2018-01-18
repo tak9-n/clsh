@@ -1,6 +1,8 @@
 (require :maxpc)
+(require :cl-fad)
 (defpackage clsh.parser
   (:use common-lisp
+        cl-fad
         maxpc
         maxpc.char)
   (:export parse-cmdline))
@@ -24,9 +26,11 @@
 
 (defun =tilda-expansion ()
   (=destructure (_ user)
-                (=list (?char #\~) (%maybe (=words)))
+                (=list (?char #\~) (%maybe (%and (?not (?eq #\/)) (=words))))
                 (if user
-                    (concatenate 'string "/home/" user)
+                    (namestring
+                     (merge-pathnames-as-directory (pathname-parent-directory (user-homedir-pathname))
+                                                   (make-pathname :directory (list :relative user))))
                     (namestring (user-homedir-pathname)))))
 
 (defun =single-quoted-string ()

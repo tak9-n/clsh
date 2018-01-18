@@ -3,12 +3,12 @@
 (require :cl-ppcre)
 
 (load #P"jobs.lisp")
-(load #P"cmdline_parser.lisp")
+(load #P"parser.lisp")
 
 (defpackage clsh
   (:use    common-lisp
            alexandria
-           clsh-jobs)
+           clsh.jobs)
   (:export run))
 
 (in-package :clsh)
@@ -103,7 +103,7 @@
                                         ;TODO using another name space might be better.
 (defun find-command-symbol (cmd)
   (multiple-value-bind (sym statsu)
-      (find-symbol (string-upcase cmd) 'clsh-commands )
+      (find-symbol (string-upcase cmd) 'clsh.commands)
     (if (eq statsu :external)
         sym
         nil)))
