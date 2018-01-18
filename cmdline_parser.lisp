@@ -1,10 +1,10 @@
 (require :maxpc)
-(defpackage clsh-parser
+(defpackage clsh.parser
   (:use common-lisp
         maxpc
         maxpc.char)
   (:export parse-cmdline))
-(in-package clsh-parser)
+(in-package clsh.parser)
 
 (defun ?some-whitespace ()
   (%some (?whitespace)))
@@ -13,13 +13,13 @@
 (defun %delimiter ()
   (%or (?whitespace)
        (?newline)
-       (?char #\|)))
+       (?char #\|)
+       (?char #\&)))
 
 (defun =words ()
   (=subseq
    (%some
-    (%and (?not (%delimiter))
-          (=element)))))
+    (?not (%delimiter)))))
 
 
 (defun =tilda-expansion ()
@@ -46,7 +46,7 @@
                 str))
 
 (defun =string-with-backslash ()
-  (=transform
+  (=subseq
    (%some
     (%or
      (=destructure (_ letter)
@@ -54,8 +54,7 @@
           (?eq #\\)
           (=element))
        letter)
-     (=words)))
-   (lambda (x) (coerce x 'string))))
+     (=words)))))
 
 (defun =string ()
   (%or
@@ -76,18 +75,19 @@
     (cons cmd args)))
 
 (defun =command-line ()
-  (=destructure (cmd follow-cmd bg)
+  (=destructure (cmd follow-cmd _ bg)
       (=list
        (=command)
        (%any
-        (=destructure (_ cmd)
+        (=destructure (_ cmd _)
             (=list
              (=list (?any-whitespace)
                     (?char #\|)
                     (?any-whitespace))
              (=command))
-            cmd))
-       (%maybe (%and (?any-whitespace) (?char #\&))))
+          cmd))
+       (?any-whitespace)
+       (%maybe (=transform (?char #\&) (lambda (x) (declare (ignore x)) t))))
     (cons bg (cons cmd follow-cmd))))
 
 (defun parse-cmdline (source)

@@ -4,6 +4,7 @@
 
 (load #P"jobs.lisp")
 (load #P"cmdline_parser.lisp")
+
 (defpackage clsh
   (:use    common-lisp
            alexandria
@@ -108,7 +109,7 @@
         nil)))
 
 (defun cmdline-execute (line)
-  (let* ((p (clsh-parser:parse-cmdline line))
+  (let* ((p (clsh.parser:parse-cmdline line))
          (cmds (cdr p))
          (bg-flg (car p))
          (func-sym (find-command-symbol (caar cmds))))
