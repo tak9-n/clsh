@@ -54,28 +54,50 @@
         (sb-posix:close fd)
       (sb-posix:syscall-error (e) (declare (ignore e))))))
 
-                                        ;TODO パイプ処理については検討が必要
-;;kokokara パイプ処理できるように
-(defun run-programs (cmds &key (input t) (output t))
-  (let ((cmd (car cmds))
-        (pid (sb-posix:posix-fork)))
-    (if (eq pid 0)
-        (progn ;child
-          (sb-posix:setpgrp)
-          (tcsetpgrp *tty-fd* pid)
-          (sb-sys:default-interrupt sb-posix:sigtstp)
-          (sb-sys:default-interrupt sb-posix:sigttou)
-          (sb-sys:default-interrupt sb-posix:sigttin)
-          ;; (let ((input-fd (if (eq input t) 0 (sb-sys:fd-stream-fd input)))
-          ;;       (output-fd (if (eq output t) 1 (sb-sys:fd-stream-fd output))))
-          ;;   (sb-posix:dup2 input-fd 0)
-          ;;   (sb-posix:dup2 output-fd 1))
-          (close-all-fd)
-          (exec (car cmd) (cdr cmd)))
-        (progn ;parent
-          (sb-posix:setpgid pid pid)
-          (setf *current-job* pid)
-          pid))))
+(defun run-programs (cmds &key (input 0) (output 1))
+  (do* ((now-cmds cmds (cdr now-cmds))
+        (cmd (car now-cmds) (car now-cmds))
+        (grpid nil)
+        (next-in)
+        (out-fd)
+        (in-fd input next-in)
+        (child-pids))
+       ((null now-cmds) (values child-pids grpid))
+    (if (cdr now-cmds)
+        (multiple-value-bind (p-in p-out)
+            (sb-posix:pipe)
+          (setf out-fd p-out)
+          (setf next-in p-in))
+        (progn
+          (setf out-fd output)
+          (setf next-in nil)))
+    (let ((pid (sb-posix:posix-fork)))
+      (if (eq pid 0)
+          (progn ;child
+            (if grpid
+                (sb-posix:setpgid 0 grpid)
+                (progn
+                  (sb-posix:setpgrp)
+                  (tcsetpgrp *tty-fd* pid)))
+            (sb-sys:default-interrupt sb-posix:sigtstp)
+            (sb-sys:default-interrupt sb-posix:sigttou)
+            (sb-sys:default-interrupt sb-posix:sigttin)
+            (unless (eq in-fd input)
+              (sb-posix:dup2 in-fd 0))
+            (unless (eq out-fd output)
+              (sb-posix:dup2 out-fd 1))
+            (close-all-fd)
+            (exec (car cmd) (cdr cmd)))
+          (progn ;parent
+            (unless grpid
+              (setf grpid pid)
+              (setf *current-job* pid))
+            (sb-posix:setpgid pid grpid)
+            (unless (eq in-fd input)
+              (sb-posix:close in-fd))
+            (unless (eq out-fd output)
+              (sb-posix:close out-fd))
+            (push pid child-pids))))))
 
 (defun delete-done-job (job)
   (setf *jobs* (delete job *jobs*))
@@ -84,15 +106,16 @@
 
 #+sbcl
 (defun create-job (cmds input output)
-  (let* ((pid (run-programs cmds :output output :input input))
-         (proc (make-job :no *jobno-counter*
-                         :commands cmds
-                         :pids (cons pid nil)
-                         :pgid pid
-                         :status 'running)))
-    (push proc *jobs*)
-    (setf *jobno-counter* (1+ *jobno-counter*))
-    proc))
+  (multiple-value-bind (pids grpid)
+      (run-programs cmds :output output :input input)
+    (let ((proc (make-job :no *jobno-counter*
+                          :commands cmds
+                          :pids pids
+                          :pgid grpid
+                          :status 'running)))
+      (push proc *jobs*)
+      (setf *jobno-counter* (1+ *jobno-counter*))
+      proc)))
 
 (defun status2string (status)
   (case status

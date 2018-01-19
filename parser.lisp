@@ -1,5 +1,6 @@
 (require :maxpc)
 (require :cl-fad)
+
 (defpackage clsh.parser
   (:use common-lisp
         cl-fad
@@ -83,7 +84,7 @@
       (=list
        (=command)
        (%any
-        (=destructure (_ cmd _)
+        (=destructure (_ cmd)
             (=list
              (=list (?any-whitespace)
                     (?char #\|)
