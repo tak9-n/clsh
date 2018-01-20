@@ -33,7 +33,10 @@
                         :pointer (cffi:foreign-alloc :string
                                                      :initial-contents `(,program ,@args)
                                                      :null-terminated-p t)
-                        :int))
+                        :int)
+  (princ "not found command")
+  (fresh-line)
+  (sb-posix:exit 1))
 (defun tcsetpgrp (fd pgrp)
   (cffi:foreign-funcall "tcsetpgrp"
                         :int fd
@@ -157,7 +160,7 @@
           (setf (job-status job) 'stopped)
           (show-status-message job)))
     (setf *current-job* nil)))
-#+SBCL
+#+sbcl
 (defun send-signal-to-job (job sig-no)
   (sb-posix:killpg (job-pgid job) sig-no)
   (let ((jobs *jobs*))

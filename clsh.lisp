@@ -9,7 +9,7 @@
   (:use    common-lisp
            alexandria
            clsh.jobs)
-  (:export run))
+  (:export run *prompt-function*))
 
 (in-package :clsh)
 
@@ -41,8 +41,6 @@
 (defun run-program-no-wait (cmds &key (input t))
   (create-job cmds input :stream))
 
-(defvar *command-standard-input* nil)
-
 (set-macro-character #\] (get-macro-character #\)))
 (set-dispatch-macro-character #\# #\[
                               (lambda (stream char1 char2)
@@ -52,15 +50,8 @@
                                      (let ((command-line (read-delimited-list #\] stream t)))
                                        (list 'run-program-no-wait (princ-to-string (car command-line))
                                              `',(mapcar #'princ-to-string (rest command-line))
-                                             ':input '*command-standard-input*))
+                                             ':output :stream))
                                   (setf (readtable-case *readtable*) :upcase))))
-
-(defmacro rd (&rest body)
-  (cons 'progn
-        (append (mapcar (lambda (x)
-                          `(setf *command-standard-input* ,x))
-                        body)
-                '((setf *command-standard-input* nil)))))
 
 ;;; Define and register function that does custom completion: if user enters
 ;;; first word, it will be completed as a verb, second and later words will
@@ -114,10 +105,23 @@
          (bg-flg (car p))
          (func-sym (find-command-symbol (caar cmds))))
     (if (fboundp func-sym)
-        (apply func-sym (cdar cmds))
+        (progn
+          (apply func-sym (cdar cmds))
+          (fresh-line))
         (if bg-flg
             (run-program-no-wait cmds)
             (princ (run-program-wait cmds))))))
+
+(defvar *prompt-function*
+  (lambda (count)
+    (declare (ignore count))
+    (format nil "~a:[~a]> "
+            (ppcre:regex-replace (concatenate 'string "^" (namestring (user-homedir-pathname)))
+                                 (concatenate 'string (sb-posix:getcwd) "/") "~/")
+            (package-name *package*))))
+
+(defun lisp-syntax-p (text)
+  (ppcre:scan "^[ 	]*\\(" text))
 
 (defun run ()
   (read-history)
@@ -127,12 +131,12 @@
     (handler-case
         (progn
           (setf text
-                (rl:readline :prompt (format nil "~a:[~a]> " (package-name *package*) i)
+                (rl:readline :prompt (funcall *prompt-function* i)
                              :add-history t
                              :novelty-check #'novelty-check))
           (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
-                ((ppcre:scan "^[ 	]*\\(" text)
-                 (eval (read-from-string text))
+                ((lisp-syntax-p text)
+                 (princ (eval (read-from-string text)))
                  (fresh-line))
                 (t
                  (cmdline-execute text)))

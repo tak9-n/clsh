@@ -24,7 +24,6 @@
    (%some
     (?not (%delimiter)))))
 
-
 (defun =tilda-expansion ()
   (=destructure (_ user)
                 (=list (?char #\~) (%maybe (%and (?not (?eq #\/)) (=words))))

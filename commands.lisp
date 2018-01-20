@@ -6,13 +6,15 @@
 
 (in-package clsh.commands)
 
+#+sbcl
 (defun exit ()
   (clsh::write-history)
-  #+sbcl
   (sb-ext:exit))
-(defun cd (dir)
-  #+sbcl
-  (sb-posix:chdir dir))
+#+sbcl
+(defun cd (&optional dir)
+  (sb-posix:chdir (if dir
+                      (coerce dir 'simple-string)
+                      (namestring (user-homedir-pathname)))))
 (defun fg (&optional jobno)
   (clsh.jobs:make-job-active jobno t))
 (defun bg (&optional jobno)
