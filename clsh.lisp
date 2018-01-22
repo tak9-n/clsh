@@ -64,7 +64,7 @@
              (let* ((cmd (first cmd-spec))
                     (path-cmd (command-with-path cmd *command-hash*)))
                (if (and path-cmd (executable-p path-cmd))
-                   (cons path-cmd (rest cmd-spec))
+                   (cons path-cmd cmd-spec)
                    (progn
                      (format t "not found \"~a\" command~%" cmd)
                      (return-from run-program-no-wait nil)))))

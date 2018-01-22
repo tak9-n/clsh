@@ -29,7 +29,7 @@
 (defvar *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr))
 (defun exec (program args)
   (let ((c-args (cffi:foreign-alloc :string
-                                                     :initial-contents `(,program ,@args)
+                                                     :initial-contents args
                                                      :null-terminated-p t)))
     (cffi:foreign-funcall "execv"
                           :string program
