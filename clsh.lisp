@@ -33,13 +33,46 @@
         (pkg package pkgs)
       (push pkg pkgs))))
 
+(defvar *command-list* nil)
+(defvar *command-hash* nil)
+
+(defun lisp-syntax-p (text)
+  (ppcre:scan "^[ 	]*\\(" text))
+
+(defun command-path-specified-p (cmd)
+  (ppcre:scan "/" cmd))
+
+(defun command-with-path (cmd hash)
+  (if (command-path-specified-p cmd)
+      cmd
+      (namestring (gethash cmd hash nil))))
+
+#+sbcl
+(defun executable-p (path)
+  (handler-case
+      (progn (sb-posix:access path sb-posix:x-ok)
+             t)
+    (sb-posix:syscall-error (e) (declare (ignore e)) nil)))
+
+(defun run-program-no-wait (cmds &key (input 0) (output :stream))
+  (declare (ignore input output))
+  (create-job
+   (mapcar (lambda (cmd-spec)
+             (let* ((cmd (first cmd-spec))
+                    (path-cmd (command-with-path cmd *command-hash*)))
+               (if (and path-cmd (executable-p path-cmd))
+                   (cons path-cmd (rest cmd-spec))
+                   (progn
+                     (format t "not found \"~s\" command" cmd)
+                     (return-from run-program-no-wait nil)))))
+           cmds)
+   0 1))
+
 (defun run-program-wait (cmds &key (input t))
   (let* ((os (make-string-output-stream))
-         (job (create-job cmds input os)))
+         (job (run-program-no-wait cmds :input input :output os)))
     (wait-job job)
     (get-output-stream-string os)))
-(defun run-program-no-wait (cmds &key (input t))
-  (create-job cmds input :stream))
 
 (set-macro-character #\] (get-macro-character #\)))
 (set-dispatch-macro-character #\# #\[
@@ -56,7 +89,7 @@
 ;;; Define and register function that does custom completion: if user enters
 ;;; first word, it will be completed as a verb, second and later words will
 ;;; be completed as fruits.
-(defun complete-all-symbols (text start end)
+(defun complete (comp-list text start end)
   (declare (ignore start end))
   (labels ((common-prefix (items)
              (subseq
@@ -76,9 +109,28 @@
                (if (cdr els)
                    (cons (common-prefix els) els)
                    els))))
-    (select-completions (mapcar #'symbol-name (package-symbols-in-current)))))
+    (select-completions comp-list)))
 
-(rl:register-function :complete #'complete-all-symbols)
+(defun init-command-hash ()
+  (let ((paths (mapcar (lambda (ps) (make-pathname :directory ps :name :wild))
+                       (ppcre:split ":" (sb-posix:getenv "PATH")))))
+    (setf *command-hash* (make-hash-table :test #'equal))
+    (setf *command-list* nil)
+    (mapc (lambda (p)
+            (mapc (lambda (f)
+                    (when (executable-p f)
+                      (let ((name (pathname-name f)))
+                        (setf (gethash name *command-hash*) f)
+                        (push name *command-list*))))
+                  (directory p)))
+          paths)))
+
+(defun complete-cmdline (text start end)
+  (if (lisp-syntax-p rl:*line-buffer*)
+      (complete (mapcar #'symbol-name (package-symbols-in-current)) text start end)
+      (complete *command-list* text start end)))
+
+(rl:register-function :complete #'complete-cmdline)
 
 (defvar *readline-name* "clsh")
 
@@ -91,7 +143,6 @@
 (defun write-history ()
   (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
 
-                                        ;TODO using another name space might be better.
 (defun find-command-symbol (cmd)
   (multiple-value-bind (sym statsu)
       (find-symbol (string-upcase cmd) 'clsh.commands)
@@ -120,11 +171,9 @@
                                  (concatenate 'string (sb-posix:getcwd) "/") "~/")
             (package-name *package*))))
 
-(defun lisp-syntax-p (text)
-  (ppcre:scan "^[ 	]*\\(" text))
-
 (defun run ()
   (read-history)
+  (init-command-hash)
   (do ((i 0 (1+ i))
        (text ""))
       (nil)
