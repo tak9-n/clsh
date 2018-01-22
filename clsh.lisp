@@ -45,7 +45,10 @@
 (defun command-with-path (cmd hash)
   (if (command-path-specified-p cmd)
       cmd
-      (namestring (gethash cmd hash nil))))
+      (let ((cmd-path (gethash cmd hash nil)))
+        (if cmd-path
+            (namestring cmd-path)
+            nil))))
 
 #+sbcl
 (defun executable-p (path)
@@ -55,7 +58,7 @@
     (sb-posix:syscall-error (e) (declare (ignore e)) nil)))
 
 (defun run-program-no-wait (cmds &key (input 0) (output :stream))
-  (declare (ignore input output))
+  (declare (ignore input output)) ;TODO remove when implement command pipe.
   (create-job
    (mapcar (lambda (cmd-spec)
              (let* ((cmd (first cmd-spec))
@@ -63,7 +66,7 @@
                (if (and path-cmd (executable-p path-cmd))
                    (cons path-cmd (rest cmd-spec))
                    (progn
-                     (format t "not found \"~s\" command" cmd)
+                     (format t "not found \"~a\" command~%" cmd)
                      (return-from run-program-no-wait nil)))))
            cmds)
    0 1))
@@ -71,8 +74,9 @@
 (defun run-program-wait (cmds &key (input t))
   (let* ((os (make-string-output-stream))
          (job (run-program-no-wait cmds :input input :output os)))
-    (wait-job job)
-    (get-output-stream-string os)))
+    (when job
+        (wait-job job)
+        (get-output-stream-string os))))
 
 (set-macro-character #\] (get-macro-character #\)))
 (set-dispatch-macro-character #\# #\[

@@ -28,12 +28,14 @@
 
 (defvar *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr))
 (defun exec (program args)
-  (cffi:foreign-funcall "execv"
-                        :string program
-                        :pointer (cffi:foreign-alloc :string
+  (let ((c-args (cffi:foreign-alloc :string
                                                      :initial-contents `(,program ,@args)
-                                                     :null-terminated-p t)
-                        :int)
+                                                     :null-terminated-p t)))
+    (cffi:foreign-funcall "execv"
+                          :string program
+                          :pointer c-args
+                          :int)
+    (cffi:foreign-free c-args))
   (princ "not found command")
   (fresh-line)
   (sb-posix:exit 1))
