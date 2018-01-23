@@ -134,11 +134,21 @@
           paths)
     (setf *command-list* (sort-by-length command-list))))
 
+(defun complete-list-filename (text start end)
+  (declare (ignore start end))
+  (sort-by-length (mapcar #'namestring (directory (pathname text)))))
+
+(defun complete-list-for-command (text start end)
+  (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
+    (if (< 1 (length (first (nreverse p))))
+        (complete-list-filename text start end)
+        *command-list*)))
+
 (defun complete-cmdline (text start end)
   (complete
    (if (lisp-syntax-p rl:*line-buffer*)
        (sort-by-length (mapcar #'symbol-name (package-symbols-in-current)))
-       *command-list*)
+       (complete-list-for-command text start end))
    text start end))
 
 (rl:register-function :complete #'complete-cmdline)
@@ -196,7 +206,7 @@
                              :novelty-check #'novelty-check))
           (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
                 ((lisp-syntax-p text)
-                 (princ (eval (read-from-string text)))
+                 (print (eval (read-from-string text)))
                  (fresh-line))
                 (t
                  (cmdline-execute text)))
