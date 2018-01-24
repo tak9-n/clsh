@@ -115,24 +115,41 @@
                    els))))
     (select-completions comp-list)))
 
-(defun init-command-hash ()
+;notice: destrucvice!!
+(defun sort-by-length (lst)
+  (sort lst (lambda (x y) (< (length x) (length y)))))
+
+(defun build-command-hash ()
   (let ((paths (mapcar (lambda (ps) (make-pathname :directory ps :name :wild))
-                       (ppcre:split ":" (sb-posix:getenv "PATH")))))
+                       (ppcre:split ":" (sb-posix:getenv "PATH"))))
+        (command-list))
     (setf *command-hash* (make-hash-table :test #'equal))
-    (setf *command-list* nil)
     (mapc (lambda (p)
             (mapc (lambda (f)
                     (when (executable-p f)
                       (let ((name (pathname-name f)))
                         (setf (gethash name *command-hash*) f)
-                        (push name *command-list*))))
+                        (push name command-list))))
                   (directory p)))
-          paths)))
+          paths)
+    (setf *command-list* (sort-by-length command-list))))
+
+(defun complete-list-filename (text start end)
+  (declare (ignore start end))
+  (sort-by-length (mapcar #'namestring (directory (pathname text)))))
+
+(defun complete-list-for-command (text start end)
+  (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
+    (if (< 1 (length (first (nreverse p))))
+        (complete-list-filename text start end)
+        *command-list*)))
 
 (defun complete-cmdline (text start end)
-  (if (lisp-syntax-p rl:*line-buffer*)
-      (complete (mapcar #'symbol-name (package-symbols-in-current)) text start end)
-      (complete *command-list* text start end)))
+  (complete
+   (if (lisp-syntax-p rl:*line-buffer*)
+       (sort-by-length (mapcar #'symbol-name (package-symbols-in-current)))
+       (complete-list-for-command text start end))
+   text start end))
 
 (rl:register-function :complete #'complete-cmdline)
 
@@ -177,7 +194,7 @@
 
 (defun run ()
   (read-history)
-  (init-command-hash)
+  (build-command-hash)
   (do ((i 0 (1+ i))
        (text ""))
       (nil)
@@ -189,7 +206,7 @@
                              :novelty-check #'novelty-check))
           (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
                 ((lisp-syntax-p text)
-                 (princ (eval (read-from-string text)))
+                 (print (eval (read-from-string text)))
                  (fresh-line))
                 (t
                  (cmdline-execute text)))

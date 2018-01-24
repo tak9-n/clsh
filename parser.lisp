@@ -6,7 +6,8 @@
         cl-fad
         maxpc
         maxpc.char)
-  (:export parse-cmdline))
+  (:export parse-cmdline
+           parse-command-string))
 (in-package clsh.parser)
 
 (defun ?some-whitespace ()
@@ -94,5 +95,22 @@
        (%maybe (=transform (?char #\&) (lambda (x) (declare (ignore x)) t))))
     (cons bg (cons cmd follow-cmd))))
 
+(defun =command-string ()
+  (=destructure (cmd follow-cmd _)
+      (=list
+       (=command)
+       (%any
+        (=destructure (_ cmd)
+            (=list
+             (=list (?any-whitespace)
+                    (?char #\|)
+                    (?any-whitespace))
+             (=command))
+          cmd))
+       (?any-whitespace))
+    (cons cmd follow-cmd)))
+
 (defun parse-cmdline (source)
   (parse source (=command-line)))
+(defun parse-command-string (source)
+  (parse source (=command-string)))
