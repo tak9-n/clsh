@@ -134,9 +134,20 @@
           paths)
     (setf *command-list* (sort-by-length command-list))))
 
+(defun directory-specified-p (name)
+  (ppcre:scan "^/" name))
+
 (defun complete-list-filename (text start end)
   (declare (ignore start end))
-  (sort-by-length (mapcar #'namestring (directory (pathname text)))))
+  (sort-by-length
+   (mapcar (lambda (p)
+             (multiple-value-bind (_ matched) (ppcre:scan-to-strings "([^/]+)/?$" (namestring p))
+               (aref matched 0)))
+           (directory (make-pathname :name :wild :type :wild :directory
+                                     (pathname-directory
+                                      (if (directory-specified-p text)
+                                          (pathname text)
+                                          (truename (sb-posix:getcwd)))))))))
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
