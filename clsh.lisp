@@ -115,7 +115,7 @@
                    els))))
     (select-completions comp-list)))
 
-;notice: destrucvice!!
+;notice: destructive!!
 (defun sort-by-length (lst)
   (sort lst (lambda (x y) (< (length x) (length y)))))
 
@@ -130,7 +130,7 @@
                       (let ((name (pathname-name f)))
                         (setf (gethash name *command-hash*) f)
                         (push name command-list))))
-                  (directory p)))
+                  (directory p :resolve-symlinks nil)))
           paths)
     (setf *command-list* (sort-by-length command-list))))
 
@@ -147,7 +147,8 @@
                                      (pathname-directory
                                       (if (directory-specified-p text)
                                           (pathname text)
-                                          (truename (sb-posix:getcwd)))))))))
+                                          (truename (sb-posix:getcwd)))))
+                      :resolve-symlinks nil))))
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
