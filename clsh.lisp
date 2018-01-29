@@ -141,9 +141,11 @@
   (declare (ignore start end))
   (sort-by-length
    (mapcar (lambda (p)
-             (multiple-value-bind (r matched) (ppcre:scan-to-strings "([^/]+)/?$" (namestring p))
-               (declare (ignore r))
-               (aref matched 0)))
+             (multiple-value-bind (result matched)
+                 (ppcre:regex-replace (concatenate 'string "^" (namestring (sb-posix:getcwd)))
+                                      (namestring p)
+                                      ".")
+               result))
            (directory (make-pathname :name :wild :type :wild :directory
                                      (pathname-directory
                                       (if (directory-specified-p text)
@@ -155,7 +157,9 @@
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
     (if (< 1 (length (first (nreverse p))))
         (complete-list-filename text start end)
-        *command-list*)))
+        (if (ppcre:scan "/" text)
+            (complete-list-filename text start end)
+            *command-list*))))
 
 (defun complete-cmdline (text start end)
   (complete
