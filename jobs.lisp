@@ -29,8 +29,8 @@
 (defvar *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr))
 (defun exec (program args)
   (let ((c-args (cffi:foreign-alloc :string
-                                                     :initial-contents `(,program ,@args)
-                                                     :null-terminated-p t)))
+                                    :initial-contents `(,program ,@args)
+                                    :null-terminated-p t)))
     (cffi:foreign-funcall "execv"
                           :string program
                           :pointer c-args
@@ -76,33 +76,37 @@
         (progn
           (setf out-fd output)
           (setf next-in nil)))
-    (let ((pid (sb-posix:posix-fork)))
-      (if (eq pid 0)
-          (progn ;child
-            (if grpid
-                (sb-posix:setpgid 0 grpid)
-                (progn
-                  (sb-posix:setpgrp)
-                  (tcsetpgrp *tty-fd* pid)))
-            (sb-sys:default-interrupt sb-posix:sigtstp)
-            (sb-sys:default-interrupt sb-posix:sigttou)
-            (sb-sys:default-interrupt sb-posix:sigttin)
-            (unless (eq in-fd input)
-              (sb-posix:dup2 in-fd 0))
-            (unless (eq out-fd output)
-              (sb-posix:dup2 out-fd 1))
-            (close-all-fd)
-            (exec (car cmd) (cdr cmd)))
-          (progn ;parent
-            (unless grpid
-              (setf grpid pid)
-              (setf *current-job* pid))
-            (sb-posix:setpgid pid grpid)
-            (unless (eq in-fd input)
-              (sb-posix:close in-fd))
-            (unless (eq out-fd output)
-              (sb-posix:close out-fd))
-            (push pid child-pids))))))
+    (sb-thread::with-all-threads-lock
+      (let ((pid (sb-posix:posix-fork)))
+        (if (eq pid 0)
+            (progn ;child
+              #+darwin
+              (sb-posix:darwin-reinit)
+              (if grpid
+                  (sb-posix:setpgid 0 grpid)
+                  (progn
+                    (sb-posix:setpgrp)
+                    (tcsetpgrp *tty-fd* pid)))
+              (sb-sys:default-interrupt sb-posix:sigtstp)
+              (sb-sys:default-interrupt sb-posix:sigttou)
+              (sb-sys:default-interrupt sb-posix:sigttin)
+              (unless (eq in-fd input)
+                (sb-posix:dup2 in-fd 0))
+              (unless (eq out-fd output)
+                (sb-posix:dup2 out-fd 1))
+              (close-all-fd)
+              (exec (car cmd) (cdr cmd)))
+            (progn ;parent
+              (unless grpid
+                (setf grpid pid)
+                (setf *current-job* pid))
+              (sb-posix:setpgid pid grpid)
+              (unless (eq in-fd input)
+                (sb-posix:close in-fd))
+              (unless (eq out-fd output)
+                (sb-posix:close out-fd))
+              (push pid child-pids))))
+      )))
 
 (defun delete-done-job (job)
   (setf *jobs* (delete job *jobs*))

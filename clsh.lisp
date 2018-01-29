@@ -141,7 +141,8 @@
   (declare (ignore start end))
   (sort-by-length
    (mapcar (lambda (p)
-             (multiple-value-bind (_ matched) (ppcre:scan-to-strings "([^/]+)/?$" (namestring p))
+             (multiple-value-bind (r matched) (ppcre:scan-to-strings "([^/]+)/?$" (namestring p))
+               (declare (ignore r))
                (aref matched 0)))
            (directory (make-pathname :name :wild :type :wild :directory
                                      (pathname-directory
