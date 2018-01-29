@@ -53,7 +53,7 @@
 #+sbcl
 (defun executable-p (path)
   (handler-case
-      (progn (sb-posix:access path sb-posix:x-ok)
+      (progn (sb-posix:access (namestring path) sb-posix:x-ok)
              t)
     (sb-posix:syscall-error (e) (declare (ignore e)) nil)))
 
