@@ -6,15 +6,24 @@
 
 (in-package clsh.commands)
 
+(defvar *before-directory* nil)
+
 #+sbcl
 (defun exit ()
   (clsh::write-history)
   (sb-ext:exit))
 #+sbcl
 (defun cd (&optional dir)
-  (sb-posix:chdir (if dir
-                      (coerce dir 'simple-string)
-                      (namestring (user-homedir-pathname)))))
+  (let ((dir-to-move (if (equal dir "-")
+                         (if *before-directory*
+                             *before-directory*
+                             (namestring (user-homedir-pathname)))
+                         (if dir
+                             (coerce dir 'simple-string)
+                             (namestring (user-homedir-pathname))))))
+    (setf *before-directory* (sb-posix:getcwd))
+    (sb-posix:chdir dir-to-move)))
+
 (defun fg (&optional jobno)
   (clsh.jobs:make-job-active jobno t))
 (defun bg (&optional jobno)

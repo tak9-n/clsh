@@ -222,7 +222,7 @@
                    (sb-debug:print-backtrace)
                    (go cmd-loop)))
          (sb-sys:interactive-interrupt (lambda (i)
-                                         (format *error-output* "~a~%" i)
+                                         (format *error-output* "~%~a~%" i)
                                          (go cmd-loop)
                                          )))
       (progn
