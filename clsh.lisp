@@ -90,26 +90,29 @@
                                              ':output :stream))
                                   (setf (readtable-case *readtable*) :upcase))))
 
+(defun pass-prefix (text lst)
+  (remove-if-not (curry #'starts-with-subseq text) lst))
+
 ;;; Define and register function that does custom completion: if user enters
 ;;; first word, it will be completed as a verb, second and later words will
 ;;; be completed as fruits.
+(defun common-prefix (items)
+  (subseq
+   (car items) 0
+   (position
+    nil
+    (mapcar
+     (lambda (i)
+       (every (lambda (x)
+                (char= (char (car items) i)
+                       (char x           i)))
+              (cdr items)))
+     (iota (reduce #'min (mapcar #'length items)))))))
+
 (defun complete (comp-list text start end)
   (declare (ignore start end))
-  (labels ((common-prefix (items)
-             (subseq
-              (car items) 0
-              (position
-               nil
-               (mapcar
-                (lambda (i)
-                  (every (lambda (x)
-                           (char= (char (car items) i)
-                                  (char x           i)))
-                         (cdr items)))
-                (iota (reduce #'min (mapcar #'length items)))))))
-           (select-completions (list)
-             (let ((els (remove-if-not (curry #'starts-with-subseq text)
-                                       list)))
+  (labels ((select-completions (list)
+             (let ((els (pass-prefix text list)))
                (if (cdr els)
                    (cons (common-prefix els) els)
                    els))))
@@ -137,21 +140,24 @@
 (defun directory-specified-p (name)
   (ppcre:scan "^/" name))
 
+(defun get-complete-list-filename (text start end)
+  (let ((p (remove-if-not (lambda (x) (starts-with-subseq text (namestring x)))
+                          (directory (make-pathname :name :wild :type :wild
+                                                    :directory (pathname-directory (pathname text)))
+                                     :resolve-symlinks nil))))
+    (if (or (null p) (rest p) (pathname-name (first p)))
+        p
+        (get-complete-list-filename (namestring (first p)) start end))))
+
 (defun complete-list-filename (text start end)
-  (declare (ignore start end))
-  (sort-by-length
-   (mapcar (lambda (p)
-             (multiple-value-bind (result matched)
-                 (ppcre:regex-replace (concatenate 'string "^" (namestring (sb-posix:getcwd)))
-                                      (namestring p)
-                                      ".")
-               result))
-           (directory (make-pathname :name :wild :type :wild :directory
-                                     (pathname-directory
-                                      (if (directory-specified-p text)
-                                          (pathname text)
-                                          (truename (sb-posix:getcwd)))))
-                      :resolve-symlinks nil))))
+  (let* ((path-for-prefix (or (directory-specified-p text) (namestring (truename "."))))
+         (path (if path-for-prefix
+                   (concatenate 'string path-for-prefix text)
+                   text))
+         (lst    (mapcar (lambda (x)
+                           (subseq (namestring x) (length path-for-prefix)))
+                         (get-complete-list-filename path start end))))
+    (cons (common-prefix lst) lst)))
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
@@ -162,11 +168,14 @@
             *command-list*))))
 
 (defun complete-cmdline (text start end)
-  (complete
-   (if (lisp-syntax-p rl:*line-buffer*)
+  (if (lisp-syntax-p rl:*line-buffer*)
+      (complete
        (sort-by-length (mapcar #'symbol-name (package-symbols-in-current)))
-       (complete-list-for-command text start end))
-   text start end))
+       text start end)
+      (complete
+       (sort-by-length
+        (complete-list-for-command text start end))
+       text start end)))
 
 (rl:register-function :complete #'complete-cmdline)
 
