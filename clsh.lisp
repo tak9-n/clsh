@@ -154,10 +154,10 @@
          (path (if path-for-prefix
                    (concatenate 'string path-for-prefix text)
                    text))
-         (lst    (mapcar (lambda (x)
+         (cmp-lst    (mapcar (lambda (x)
                            (subseq (namestring x) (length path-for-prefix)))
                          (get-complete-list-filename path start end))))
-    (cons (common-prefix lst) lst)))
+    (cons (common-prefix cmp-lst) cmp-lst)))
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
@@ -165,17 +165,14 @@
         (complete-list-filename text start end)
         (if (ppcre:scan "/" text)
             (complete-list-filename text start end)
-            *command-list*))))
+            (complete *command-list* text start end)))))
 
 (defun complete-cmdline (text start end)
   (if (lisp-syntax-p rl:*line-buffer*)
       (complete
        (sort-by-length (mapcar #'symbol-name (package-symbols-in-current)))
        text start end)
-      (complete
-       (sort-by-length
-        (complete-list-for-command text start end))
-       text start end)))
+      (complete-list-for-command text start end)))
 
 (rl:register-function :complete #'complete-cmdline)
 
