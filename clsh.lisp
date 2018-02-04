@@ -137,27 +137,39 @@
           paths)
     (setf *command-list* (sort-by-length command-list))))
 
-(defun directory-specified-p (name)
+(defun abs-path-specified-p (name)
   (ppcre:scan "^/" name))
 
-(defun get-complete-list-filename (text start end)
+(defun get-complete-list-filename (text)
   (let ((p (remove-if-not (lambda (x) (starts-with-subseq text (namestring x)))
                           (directory (make-pathname :name :wild :type :wild
                                                     :directory (pathname-directory (pathname text)))
                                      :resolve-symlinks nil))))
     (if (or (null p) (rest p) (pathname-name (first p)))
         p
-        (get-complete-list-filename (namestring (first p)) start end))))
+        (get-complete-list-filename (namestring (first p))))))
+
+(defun described-path-to-abs (path)
+  (handler-case
+      (let* ((orig-path (ppcre:regex-replace "([^/]*)$" path ""))
+             (abs-pathname (truename orig-path))
+             (dir-string (namestring abs-pathname)))
+        (values orig-path
+                dir-string
+                (concatenate 'string dir-string (ppcre:scan-to-strings "([^/]+)$" path))))
+    (sb-int:simple-file-error ()
+      nil)))
 
 (defun complete-list-filename (text start end)
-  (let* ((path-for-prefix (or (directory-specified-p text) (namestring (truename "."))))
-         (path (if path-for-prefix
-                   (concatenate 'string path-for-prefix text)
-                   text))
-         (cmp-lst    (mapcar (lambda (x)
-                           (subseq (namestring x) (length path-for-prefix)))
-                         (get-complete-list-filename path start end))))
-    (cons (common-prefix cmp-lst) cmp-lst)))
+  (multiple-value-bind (orig-path abs-path comp-str)
+      (described-path-to-abs text)
+    (when orig-path
+      (let ((cmp-lst (mapcar (lambda (x)
+                               (ppcre:regex-replace (concatenate 'string "^" abs-path)
+                                                  (namestring x)
+                                                  orig-path))
+                             (get-complete-list-filename comp-str))))
+        (cons (common-prefix cmp-lst) cmp-lst)))))
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))

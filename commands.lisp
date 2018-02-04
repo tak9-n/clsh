@@ -23,7 +23,7 @@
                              (namestring (user-homedir-pathname))))))
     (setf *before-directory* (sb-posix:getcwd))
     (sb-posix:chdir dir-to-move)
-    (setf *default-pathname-defaults* (pathname dir-to-move))))
+    (setf *default-pathname-defaults* (pathname (concatenate 'string (sb-posix:getcwd) "/")))))
 
 (defun fg (&optional jobno)
   (clsh.jobs:make-job-active jobno t))
