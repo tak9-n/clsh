@@ -130,7 +130,7 @@
     (mapc (lambda (p)
             (mapc (lambda (f)
                     (when (executable-p f)
-                      (let ((name (pathname-name f)))
+                      (when-let ((name (pathname-name f)))
                         (setf (gethash name *command-hash*) f)
                         (push name command-list))))
                   (directory p :resolve-symlinks nil)))
@@ -179,7 +179,7 @@
         (complete-list-filename text start end)
         (if (ppcre:scan "/" text)
             (complete-list-filename text start end)
-            (complete *command-list* text start end)))))
+            (complete *command-list* TEXT start end)))))
 
 (defun complete-cmdline (text start end)
   (if (lisp-syntax-p rl:*line-buffer*)
