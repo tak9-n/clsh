@@ -160,6 +160,7 @@
     (sb-int:simple-file-error ()
       nil)))
 
+;TODO ソースが汚いので要リファクタリング
 (defun complete-list-filename (text start end)
   (multiple-value-bind (orig-path abs-path comp-str)
       (described-path-to-abs text)
@@ -169,7 +170,8 @@
                                                   (namestring x)
                                                   orig-path))
                              (get-complete-list-filename comp-str))))
-        (cons (common-prefix cmp-lst) cmp-lst)))))
+        (when cmp-lst
+          (cons (common-prefix cmp-lst) cmp-lst))))))
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
