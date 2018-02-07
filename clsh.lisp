@@ -177,9 +177,9 @@
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
     (if (< 1 (length (first (nreverse p))))
         (complete-list-filename text start end)
-        (if (ppcre:scan "/" text)
+        (if (or (ppcre:scan "/" text) (and (not (null p))  (equal text "")))
             (complete-list-filename text start end)
-            (complete *command-list* TEXT start end)))))
+            (complete *command-list* text start end)))))
 
 (defun complete-cmdline (text start end)
   (if (lisp-syntax-p rl:*line-buffer*)
