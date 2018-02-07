@@ -266,3 +266,7 @@
     ))
 
 (load #p"commands.lisp")
+
+(in-package :common-lisp-user)
+(defun v (x) x)
+(export 'v)
