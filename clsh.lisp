@@ -258,8 +258,7 @@
                            :novelty-check #'novelty-check))
         (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
               ((lisp-syntax-p text)
-               (print (eval (read-from-string text)))
-               (fresh-line))
+               (format t "result: ~s~%" (eval (read-from-string text))))
               (t
                (cmdline-execute text)))
         (pick-finished-jobs)))
