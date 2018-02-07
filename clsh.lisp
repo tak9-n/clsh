@@ -90,31 +90,37 @@
                                              ':output :stream))
                                   (setf (readtable-case *readtable*) :upcase))))
 
-(defun pass-prefix (text lst)
-  (remove-if-not (curry #'starts-with-subseq text) lst))
+(defun pass-prefix (text lst &key (ignore-case nil))
+  (remove-if-not (lambda (target)
+                   (starts-with-subseq text target :test (if ignore-case #'equalp #'equal)))
+                 lst))
 
 ;;; Define and register function that does custom completion: if user enters
 ;;; first word, it will be completed as a verb, second and later words will
 ;;; be completed as fruits.
-(defun common-prefix (items)
-  (subseq
-   (car items) 0
-   (position
-    nil
-    (mapcar
-     (lambda (i)
-       (every (lambda (x)
-                (char= (char (car items) i)
-                       (char x           i)))
-              (cdr items)))
-     (iota (reduce #'min (mapcar #'length items)))))))
+(defun common-prefix (items &key (ignore-case nil))
+  (let ((compare-func (if ignore-case
+                          #'char-equal
+                          #'char=)))
+    (subseq
+     (car items) 0
+     (position
+      nil
+      (mapcar
+       (lambda (i)
+         (every (lambda (x)
+                  (funcall compare-func
+                           (char (car items) i)
+                           (char x           i)))
+                (cdr items)))
+       (iota (reduce #'min (mapcar #'length items))))))))
 
-(defun complete (comp-list text start end)
+(defun complete (comp-list text start end &key (ignore-case nil))
   (declare (ignore start end))
   (labels ((select-completions (list)
-             (let ((els (pass-prefix text list)))
+             (let ((els (pass-prefix text list :ignore-case ignore-case)))
                (if (cdr els)
-                   (cons (common-prefix els) els)
+                   (cons (common-prefix els :ignore-case ignore-case) els)
                    els))))
     (select-completions comp-list)))
 
@@ -185,7 +191,7 @@
   (if (lisp-syntax-p rl:*line-buffer*)
       (complete
        (sort-by-length (mapcar #'symbol-name (package-symbols-in-current)))
-       text start end)
+       text start end :ignore-case t)
       (complete-list-for-command text start end)))
 
 (rl:register-function :complete #'complete-cmdline)
