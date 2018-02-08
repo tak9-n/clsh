@@ -22,9 +22,9 @@
   (string/= (string-trim " " x)
             (string-trim " " y)))
 
-(defun package-symbols-in-current ()
+(defun package-symbols (package)
   (let ((pkgs nil))
-    (do-symbols (pkg *package* pkgs)
+    (do-symbols (pkg package pkgs)
       (push pkg pkgs))))
 
 (defun package-external-symbols (package)
@@ -187,11 +187,45 @@
             (complete-list-filename text start end)
             (complete *command-list* text start end)))))
 
+(defun all-symbol-name-list-in-package (package &key has-package-name external)
+  (mapcar (lambda (p) (concatenate 'string
+                                   (when has-package-name (package-name package))
+                                   (cond
+                                     ((not has-package-name)
+                                      ""
+                                      external
+                                      ":"
+                                      t
+                                      "::"))
+                                   (symbol-name p)))
+          (if external
+              (package-external-symbols package)
+              (package-symbols package))))
+
+(defun all-package-name-list ()
+  (mapcar (lambda (p) (concatenate 'string (package-name p) ":")) (list-all-packages)))
+
+(defun complete-list-for-lisp (text start end)
+  (multiple-value-bind (s e sa ea)
+      (ppcre:scan "([^:]+)(:{1,2})" text)
+    (declare (ignore e))
+    (if (null s)
+        (complete
+         (sort-by-length
+          (nconc (all-symbol-name-list-in-package *package*)
+                 (all-package-name-list)))
+         text start end :ignore-case t)
+        (let ((package-name (subseq text (svref sa 0) (svref ea 0)))
+              (all-symbol? (= (- (svref sa 1) (svref ea 1)) 1)))
+          (complete
+           (sort-by-length (all-symbol-name-list-in-package (symbol-package (intern package-name "KEYWORD"))
+                                                            :has-package-name t
+                                                            :external all-symbol?))
+           text start end :ignore-case t)))))
+
 (defun complete-cmdline (text start end)
   (if (lisp-syntax-p rl:*line-buffer*)
-      (complete
-       (sort-by-length (mapcar #'symbol-name (package-symbols-in-current)))
-       text start end :ignore-case t)
+      (complete-list-for-lisp text start end)
       (complete-list-for-command text start end)))
 
 (rl:register-function :complete #'complete-cmdline)
