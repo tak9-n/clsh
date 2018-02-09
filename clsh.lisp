@@ -115,7 +115,7 @@
                 (cdr items)))
        (iota (reduce #'min (mapcar #'length items))))))))
 
-(defun complete (comp-list text start end &key (ignore-case nil))
+(defun complete-by-list (comp-list text start end &key (ignore-case nil))
   (declare (ignore start end))
   (labels ((select-completions (list)
              (let ((els (pass-prefix text list :ignore-case ignore-case)))
@@ -185,18 +185,17 @@
         (complete-list-filename text start end)
         (if (or (ppcre:scan "/" text) (and (not (null p))  (equal text "")))
             (complete-list-filename text start end)
-            (complete *command-list* text start end)))))
+            (complete-by-list *command-list* text start end)))))
 
 (defun all-symbol-name-list-in-package (package &key has-package-name external)
   (mapcar (lambda (p) (concatenate 'string
                                    (when has-package-name (package-name package))
-                                   (cond
-                                     ((not has-package-name)
-                                      ""
-                                      external
-                                      ":"
-                                      t
-                                      "::"))
+                                   (cond ((not has-package-name)
+                                          "")
+                                         (external
+                                          ":")
+                                         (t
+                                          "::"))
                                    (symbol-name p)))
           (if external
               (package-external-symbols package)
@@ -210,15 +209,15 @@
       (ppcre:scan "([^:]+)(:{1,2})" text)
     (declare (ignore e))
     (if (null s)
-        (complete
+        (complete-by-list
          (sort-by-length
           (nconc (all-symbol-name-list-in-package *package*)
                  (all-package-name-list)))
          text start end :ignore-case t)
         (let ((package-name (subseq text (svref sa 0) (svref ea 0)))
-              (all-symbol? (= (- (svref sa 1) (svref ea 1)) 1)))
-          (complete
-           (sort-by-length (all-symbol-name-list-in-package (symbol-package (intern package-name "KEYWORD"))
+              (all-symbol? (= (- (svref ea 1) (svref sa 1)) 1)))
+          (complete-by-list
+           (sort-by-length (all-symbol-name-list-in-package (find-package (intern package-name "KEYWORD"))
                                                             :has-package-name t
                                                             :external all-symbol?))
            text start end :ignore-case t)))))
