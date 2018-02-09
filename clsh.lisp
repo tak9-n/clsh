@@ -217,7 +217,7 @@
         (let ((package-name (subseq text (svref sa 0) (svref ea 0)))
               (all-symbol? (= (- (svref ea 1) (svref sa 1)) 1)))
           (complete-by-list
-           (sort-by-length (all-symbol-name-list-in-package (find-package (intern package-name "KEYWORD"))
+           (sort-by-length (all-symbol-name-list-in-package (find-package (intern (string-upcase package-name) "KEYWORD"))
                                                             :has-package-name t
                                                             :external all-symbol?))
            text start end :ignore-case t)))))
