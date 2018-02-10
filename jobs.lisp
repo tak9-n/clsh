@@ -9,13 +9,29 @@
 
 (in-package clsh.jobs)
 
+(defgeneric wait-job (job))
+(defgeneric make-job-obj-active (job foreground))
+(defgeneric show-status-message (job))
+(defgeneric pick-finished-job (job))
+(defgeneric send-signal-to-job (job sig-no))
+
+(defclass job
+    ()
+  ((no :initarg :no)
+   (status :initarg :status)))
+
+(defclass command-job
+    (job)
+  ((commands :initarg :commands)
+   (pids :initarg :pids)
+   (pgid :initarg :pgid)))
+
+(defclass lisp-job
+    (job)
+  ((exp :initarg :exp)
+   (tid :initarg :tid)))
+
 (defvar *jobno-counter* 1)
-(defstruct job
-  no
-  commands
-  pids
-  pgid
-  status)
 
 (defvar *clsh-pgid* (sb-posix:getpgrp))
 (defvar *jobs* nil)
@@ -117,11 +133,13 @@
 (defun create-job (cmds input output)
   (multiple-value-bind (pids grpid)
       (run-programs cmds :output output :input input)
-    (let ((proc (make-job :no *jobno-counter*
-                          :commands cmds
-                          :pids pids
-                          :pgid grpid
-                          :status 'running)))
+    (let ((proc (make-instance
+                 'command-job
+                 :no *jobno-counter*
+                 :commands cmds
+                 :pids pids
+                 :pgid grpid
+                 :status 'running)))
       (push proc *jobs*)
       (setf *jobno-counter* (1+ *jobno-counter*))
       proc)))
@@ -133,67 +151,78 @@
     (otherwise
      (format nil "status=~a" status))))
 
-(defun show-status-message (job)
-  (format t "[~d] ~a ~{~{~a~}~^ | ~}~a~%"
-          (job-no job)
-          (status2string (job-status job))
-          (job-commands job)
-          (if (eq *current-job* job)
-              ""
-              " &")))
+(defmethod show-status-message ((job command-job))
+  (with-slots (no status commands) job
+    (format t "[~d] ~a ~{~{~a~}~^ | ~}~a~%"
+            job
+            (status2string status)
+            commands
+            (if (eq *current-job* job)
+                ""
+                " &"))))
 
 #+sbcl
-(defun pick-finished-job (job)
-  (multiple-value-bind (pid status) (sb-posix:waitpid (job-pgid job) sb-posix:wnohang)
-    (when (and (eq pid (job-pgid job)) (sb-posix:wifexited status))
-      (setf (job-status job) status)
-      (show-status-message job)
-      (delete-done-job job))))
+(defmethod pick-finished-job ((job command-job))
+  (with-slots (pgid status) job
+    (multiple-value-bind (pid status) (sb-posix:waitpid pgid sb-posix:wnohang)
+      (when (and (eq pid pgid) (sb-posix:wifexited status))
+        (setf status status)
+        (show-status-message job)
+        (delete-done-job job)))))
 
 #+sbcl
-(defun wait-job (job)
-  (unless (eq *current-job* job)
-    (tcsetpgrp *tty-fd* (job-pgid job))
-    (setf *current-job* job))
-  (multiple-value-bind (pid status) (sb-posix:waitpid (car (job-pids job)) sb-posix:wuntraced)
-    (declare (ignore pid))
-    (tcsetpgrp *tty-fd* *clsh-pgid*)
-    (if (sb-posix:wifexited status)
-        (progn
-          (setf *last-done-job-status* status)
-          (delete-done-job job))
-        (progn
-          (setf (job-status job) 'stopped)
-          (show-status-message job)))
-    (setf *current-job* nil)))
+(defmethod wait-job ((job command-job))
+  (with-slots (pgid pids status) job
+    (unless (eq *current-job* job)
+      (tcsetpgrp *tty-fd* pgid)
+      (setf *current-job* job))
+    (multiple-value-bind (pid status) (sb-posix:waitpid (car pids) sb-posix:wuntraced)
+      (declare (ignore pid))
+      (tcsetpgrp *tty-fd* *clsh-pgid*)
+      (if (sb-posix:wifexited status)
+          (progn
+            (setf *last-done-job-status* status)
+            (delete-done-job job))
+          (progn
+            (setf status 'stopped)
+            (show-status-message job)))
+      (setf *current-job* nil))))
+
 #+sbcl
-(defun send-signal-to-job (job sig-no)
-  (sb-posix:killpg (job-pgid job) sig-no)
-  (let ((jobs *jobs*))
-    (setf jobs (delete job jobs))
-    (push job jobs)
-    (setf *jobs* jobs)))
+(defmethod send-signal-to-job ((job command-job) sig-no)
+  (with-slots (pgid) job
+    (sb-posix:killpg pgid sig-no)
+    (let ((jobs *jobs*))
+      (setf jobs (delete job jobs))
+      (push job jobs)
+      (setf *jobs* jobs))))
 
 (defun find-job-by-jobno (jobno)
   (find-if (lambda (job)
-             (eq (job-no job) jobno))
+             (with-slots (no) job
+               (eq no jobno)))
            jobno))
+
+(defmethod make-job-obj-active ((job command-job) foreground)
+  (with-slots (status) job
+    (progn
+      (send-signal-to-job job
+                          sb-posix:sigcont)
+      (setf status 'running)
+      (if foreground
+          (wait-job job)))))
 
 (defun make-job-active (jobno foreground)
   (let ((job (if jobno (find-job-by-jobno jobno) (car *jobs*))))
     (if job
-        (progn
-          (send-signal-to-job job
-                              sb-posix:sigcont)
-          (setf (job-status job) 'running)
-          (if foreground
-              (wait-job job)))
+        (make-job-obj-active job foreground)
         (format *error-output* "No such a job."))))
 
 (defun pick-finished-jobs ()
   (mapc (lambda (job)
           (pick-finished-job job))
         *jobs*))
+
 (defun show-jobs ()
   (mapc (lambda (job)
           (show-status-message job))
