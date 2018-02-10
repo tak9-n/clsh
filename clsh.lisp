@@ -168,6 +168,7 @@
 
 ;TODO ソースが汚いので要リファクタリング
 (defun complete-list-filename (text start end)
+  (declare (ignore start end))
   (multiple-value-bind (orig-path abs-path comp-str)
       (described-path-to-abs text)
     (when orig-path
@@ -202,24 +203,41 @@
               (package-symbols package))))
 
 (defun all-package-name-list ()
-  (mapcar (lambda (p) (concatenate 'string (package-name p) ":")) (list-all-packages)))
+  (reduce (lambda (accum p)
+            (nconc
+             (mapcar (lambda (pn)
+                       (concatenate 'string pn ":"))
+                     (cons (package-name p) (package-nicknames p)))
+             accum))
+          (list-all-packages)
+          :initial-value nil))
 
 (defun complete-list-for-lisp (text start end)
   (multiple-value-bind (s e sa ea)
       (ppcre:scan "([^:]+)(:{1,2})" text)
     (declare (ignore e))
     (if (null s)
-        (complete-by-list
-         (sort-by-length
-          (nconc (all-symbol-name-list-in-package *package*)
-                 (all-package-name-list)))
-         text start end :ignore-case t)
+        (let ((comp-lst (complete-by-list
+                         (sort-by-length
+                          (nconc (all-symbol-name-list-in-package *package*)
+                                 (all-package-name-list)))
+                         text start end :ignore-case t)))
+          (if (and (not (rest comp-lst)) (ppcre:scan ":$" (first comp-lst)))
+              (complete-list-for-lisp (first comp-lst) start end)
+              comp-lst))
         (let ((package-name (subseq text (svref sa 0) (svref ea 0)))
               (all-symbol? (= (- (svref ea 1) (svref sa 1)) 1)))
           (complete-by-list
-           (sort-by-length (all-symbol-name-list-in-package (find-package (intern (string-upcase package-name) "KEYWORD"))
-                                                            :has-package-name t
-                                                            :external all-symbol?))
+           (sort-by-length
+            (let ((p (find-package (intern (string-upcase package-name) "KEYWORD"))))
+              (when p
+                (mapcar (lambda (x)
+                          (ppcre:regex-replace (concatenate 'string "^" (package-name p) ":")
+                                               x
+                                               (concatenate 'string (string-upcase package-name) ":")))
+                        (all-symbol-name-list-in-package p
+                                                         :has-package-name t
+                                                         :external all-symbol?)))))
            text start end :ignore-case t)))))
 
 (defun complete-cmdline (text start end)
