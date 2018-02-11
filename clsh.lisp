@@ -309,12 +309,11 @@
                            :novelty-check #'novelty-check))
         (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
               ((lisp-syntax-p text)
-               (format t "result: ~s~%" (eval (read-from-string text))))
+               (wait-job (create-lisp-job (read-from-string text) 0 1)))
               (t
                (cmdline-execute text)))
         (pick-finished-jobs)))
-    cmd-loop
-    ))
+    cmd-loop))
 
 (load #p"commands.lisp")
 

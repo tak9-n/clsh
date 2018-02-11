@@ -1,7 +1,10 @@
+(require :bordeaux-threads)
+
 (defpackage clsh.jobs
-  (:use common-lisp cffi)
+  (:use common-lisp cffi bordeaux-threads)
   (:export
    create-job
+   create-lisp-job
    wait-job
    make-job-active
    pick-finished-jobs
@@ -29,7 +32,8 @@
 (defclass lisp-job
     (job)
   ((exp :initarg :exp)
-   (tid :initarg :tid)))
+   (thread :initarg :thread)
+   result))
 
 (defvar *jobno-counter* 1)
 
@@ -129,6 +133,10 @@
   (unless *jobs*
     (setf *jobno-counter* 1)))
 
+(defun register-job (job)
+  (push job *jobs*)
+  (setf *jobno-counter* (1+ *jobno-counter*)))
+
 #+sbcl
 (defun create-job (cmds input output)
   (multiple-value-bind (pids grpid)
@@ -140,9 +148,21 @@
                  :pids pids
                  :pgid grpid
                  :status 'running)))
-      (push proc *jobs*)
-      (setf *jobno-counter* (1+ *jobno-counter*))
+      (register-job proc)
       proc)))
+
+(defun create-lisp-job (exp input output)
+  (declare (ignore input output))
+  (let* ((thr (make-thread (lambda ()
+                             (eval exp))))
+         (job (make-instance
+               'lisp-job
+               :no *jobno-counter*
+               :exp exp
+               :thread thr
+               :status 'running)))
+    (register-job job)
+    job))
 
 (defun status2string (status)
   (case status
@@ -154,9 +174,19 @@
 (defmethod show-status-message ((job command-job))
   (with-slots (no status commands) job
     (format t "[~d] ~a ~{~{~a~}~^ | ~}~a~%"
-            job
+            no
             (status2string status)
             commands
+            (if (eq *current-job* job)
+                ""
+                " &"))))
+
+(defmethod show-status-message ((job lisp-job))
+  (with-slots (no status result) job
+      (format t "[~d] ~a result: ~s ~a~%"
+              no
+              (status2string status)
+              result
             (if (eq *current-job* job)
                 ""
                 " &"))))
@@ -169,6 +199,13 @@
         (setf status status)
         (show-status-message job)
         (delete-done-job job)))))
+
+(defmethod pick-finished-job ((job lisp-job))
+  (with-slots (thread status result) job
+    (unless (thread-alive-p thread)
+      (setf result (join-thread thread))
+      (show-status-message job)
+      (delete-done-job job))))
 
 #+sbcl
 (defmethod wait-job ((job command-job))
@@ -188,6 +225,15 @@
             (show-status-message job)))
       (setf *current-job* nil))))
 
+(defmethod wait-job ((job lisp-job))
+  (with-slots (thread status result) job
+    (setf *current-job* job)
+    (setf result (join-thread thread))
+    (setf status 'finished)
+    (delete-done-job job)
+    (show-status-message job))
+  (setf *current-job* nil))
+
 #+sbcl
 (defmethod send-signal-to-job ((job command-job) sig-no)
   (with-slots (pgid) job
@@ -196,6 +242,11 @@
       (setf jobs (delete job jobs))
       (push job jobs)
       (setf *jobs* jobs))))
+
+;TODO need signal processing, like stopping, restart, and others
+(defmethod send-signal-to-job ((job lisp-job) sig-no)
+  (with-slots (thread) job
+    (destroy-thread thread)))
 
 (defun find-job-by-jobno (jobno)
   (find-if (lambda (job)
@@ -211,6 +262,12 @@
       (setf status 'running)
       (if foreground
           (wait-job job)))))
+
+(defmethod make-job-obj-active ((job lisp-job) foreground)
+  (when foreground
+    (with-slots (status) job
+      (setf status 'running)
+      (wait-job job))))
 
 (defun make-job-active (jobno foreground)
   (let ((job (if jobno (find-job-by-jobno jobno) (car *jobs*))))
