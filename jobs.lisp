@@ -79,7 +79,7 @@
         (sb-posix:close fd)
       (sb-posix:syscall-error (e) (declare (ignore e))))))
 
-(defun run-programs (cmds &key (input 0) (output 1))
+(defun run-programs (cmds &key (input 0) (output 1) (error 2))
   (do* ((now-cmds cmds (cdr now-cmds))
         (cmd (car now-cmds) (car now-cmds))
         (grpid nil)
@@ -114,6 +114,8 @@
                 (sb-posix:dup2 in-fd 0))
               (unless (eq out-fd output)
                 (sb-posix:dup2 out-fd 1))
+              (unless (eq out-fd error)
+                (sb-posix:dup2 out-fd 2))
               (close-all-fd)
               (exec (car cmd) (cdr cmd)))
             (progn ;parent
@@ -125,8 +127,7 @@
                 (sb-posix:close in-fd))
               (unless (eq out-fd output)
                 (sb-posix:close out-fd))
-              (push pid child-pids))))
-      )))
+              (push pid child-pids)))))))
 
 (defun delete-done-job (job)
   (setf *jobs* (delete job *jobs*))
@@ -138,23 +139,38 @@
   (setf *jobno-counter* (1+ *jobno-counter*)))
 
 #+sbcl
-(defun create-job (cmds input output)
-  (multiple-value-bind (pids grpid)
-      (run-programs cmds :output output :input input)
-    (let ((proc (make-instance
-                 'command-job
-                 :no *jobno-counter*
-                 :commands cmds
-                 :pids pids
-                 :pgid grpid
-                 :status 'running)))
-      (register-job proc)
-      proc)))
+(defun get-fd-from-stream (stream)
+  (cond ((typep stream 'synonym-stream)
+         (get-fd-from-stream (symbol-value (synonym-stream-symbol stream))))
+        ((sb-sys:fd-stream-p stream)
+         (sb-sys:fd-stream-fd stream))
+        (t nil)))
 
-(defun create-lisp-job (exp input output)
-  (declare (ignore input output))
+#+sbcl
+(defun create-job (cmds &key (input *standard-input*) (output *standard-output*) (error *error-output*))
+  (let ((fds (mapcar (lambda (fs)
+                       (get-fd-from-stream fs))
+                     `(,input ,output ,error))))
+    (if (some #'null fds)
+        nil
+        (multiple-value-bind (pids grpid)
+            (run-programs cmds :input (first fds) :output (second fds) :error (third fds))
+          (let ((proc (make-instance
+                       'command-job
+                       :no *jobno-counter*
+                       :commands cmds
+                       :pids pids
+                       :pgid grpid
+                       :status 'running)))
+            (register-job proc)
+            proc)))))
+
+(defun create-lisp-job (exp &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (let* ((thr (make-thread (lambda ()
-                             (eval exp))))
+                             (eval exp))
+                           :initial-bindings `((*standard-input* . ,input)
+                                               (*standard-output* . ,output)
+                                               (*error-output* . ,error))))
          (job (make-instance
                'lisp-job
                :no *jobno-counter*

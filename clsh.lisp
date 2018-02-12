@@ -68,8 +68,7 @@
                    (progn
                      (format t "not found \"~a\" command~%" cmd)
                      (return-from run-program-no-wait nil)))))
-           cmds)
-   0 1))
+           cmds)))
 
 (defun run-program-wait (cmds &key (input t))
   (let* ((os (make-string-output-stream))
@@ -309,7 +308,7 @@
                            :novelty-check #'novelty-check))
         (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
               ((lisp-syntax-p text)
-               (wait-job (create-lisp-job (read-from-string text) 0 1)))
+               (wait-job (create-lisp-job (read-from-string text))))
               (t
                (cmdline-execute text)))
         (pick-finished-jobs)))
