@@ -49,7 +49,7 @@
 (defvar *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr))
 (defun exec (program args)
   (let ((c-args (cffi:foreign-alloc :string
-                                    :initial-contents `(,program ,@args)
+                                    :initial-contents args
                                     :null-terminated-p t)))
     (cffi:foreign-funcall "execv"
                           :string program
@@ -59,6 +59,7 @@
   (princ "not found command")
   (fresh-line)
   (sb-posix:exit 1))
+
 (defun tcsetpgrp (fd pgrp)
   (cffi:foreign-funcall "tcsetpgrp"
                         :int fd
@@ -114,8 +115,7 @@
                 (sb-posix:dup2 in-fd 0))
               (unless (eq out-fd output)
                 (sb-posix:dup2 out-fd 1))
-              (unless (eq out-fd error)
-                (sb-posix:dup2 out-fd 2))
+              (sb-posix:dup2 error 2)
               (close-all-fd)
               (exec (car cmd) (cdr cmd)))
             (progn ;parent
