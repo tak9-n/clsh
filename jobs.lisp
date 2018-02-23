@@ -33,7 +33,7 @@
     (job)
   ((exp :initarg :exp)
    (thread :initarg :thread)
-   (result)))
+   (result :initform nil)))
 
 (defvar *jobno-counter* 1)
 
