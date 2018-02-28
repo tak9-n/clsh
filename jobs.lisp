@@ -167,7 +167,17 @@
 
 (defun create-lisp-job (exp &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (let* ((thr (make-thread (lambda ()
-                             (eval exp))
+                             (block eval-cmd
+                               (handler-bind
+                                   ((error (lambda (e)
+                                             (format *error-output* "~a~%" e)
+                                             #+sbcl
+                                             (sb-debug:print-backtrace)
+                                             (return-from eval-cmd)))
+                                    (sb-sys:interactive-interrupt (lambda (i)
+                                                                    (format *error-output* "~%~a~%" i)
+                                                                    (return-from eval-cmd))))
+                                 (eval exp))))
                            :initial-bindings `((*standard-input* . ,input)
                                                (*standard-output* . ,output)
                                                (*error-output* . ,error))))
