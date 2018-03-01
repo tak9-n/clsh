@@ -291,17 +291,21 @@
   (do ((i 0 (1+ i))
        (text ""))
       (nil)
-    (progn
+    (handler-bind
+        ((sb-sys:interactive-interrupt (lambda (i)
+                                         (format *error-output* "~%~a~%" i)
+                                         (go cmd-loop))))
       (setf text
-            (rl:readline :prompt (funcall *prompt-function* i)
-                         :add-history t
-                         :novelty-check #'novelty-check))
+        (rl:readline :prompt (funcall *prompt-function* i)
+                     :add-history t
+                     :novelty-check #'novelty-check))
       (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
             ((lisp-syntax-p text)
              (wait-job (create-lisp-job (read-from-string text))))
             (t
              (cmdline-execute text)))
-      (pick-finished-jobs))))
+      (pick-finished-jobs))
+   cmd-loop))
 
 (load #p"commands.lisp")
 

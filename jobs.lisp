@@ -173,10 +173,7 @@
                                              (format *error-output* "~a~%" e)
                                              #+sbcl
                                              (sb-debug:print-backtrace)
-                                             (return-from eval-cmd)))
-                                    (sb-sys:interactive-interrupt (lambda (i)
-                                                                    (format *error-output* "~%~a~%" i)
-                                                                    (return-from eval-cmd))))
+                                             (return-from eval-cmd))))
                                  (eval exp))))
                            :initial-bindings `((*standard-input* . ,input)
                                                (*standard-output* . ,output)
