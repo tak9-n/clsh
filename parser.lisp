@@ -68,7 +68,7 @@
    (=tilda-expansion)
    (=string-with-backslash)))
 
-(defun =command ()
+(defun =comnand-as-shell ()
   (=destructure (cmd args)
       (=list
        (=words)
@@ -77,7 +77,27 @@
             (=list
              (?some-whitespace)
              (=string)))))
-    (cons cmd args)))
+    (cons 'shell (cons cmd args))))
+
+(defun =lisp-expression ()
+  (=list
+   (?char #\()
+   (%or
+    (%some (?not (?char #\()))
+    (%maybe '=lisp-expression/parser))
+   (?cgar #\))
+   ))
+
+(setf (fdefinition =lisp-expression/parser) (=lisp-expression))
+
+(defun =command-as-lisp ()
+  (cons 'lisp
+        (=subseq
+         (=lisp-expression))))
+
+(defun =command ()
+  (%or (=command-as-lisp)
+       (=command-as-shell)))
 
 (defun =command-line ()
   (=destructure (cmd follow-cmd _ bg)
