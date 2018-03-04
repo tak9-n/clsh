@@ -1,7 +1,10 @@
+(require :bordeaux-threads)
+
 (defpackage clsh.jobs
-  (:use common-lisp cffi)
+  (:use common-lisp cffi bordeaux-threads)
   (:export
    create-job
+   create-lisp-job
    wait-job
    make-job-active
    pick-finished-jobs
@@ -9,13 +12,30 @@
 
 (in-package clsh.jobs)
 
+(defgeneric wait-job (job))
+(defgeneric make-job-obj-active (job foreground))
+(defgeneric show-status-message (job))
+(defgeneric pick-finished-job (job))
+(defgeneric send-signal-to-job (job sig-no))
+
+(defclass job
+    ()
+  ((no :initarg :no)
+   (status :initarg :status)))
+
+(defclass command-job
+    (job)
+  ((commands :initarg :commands)
+   (pids :initarg :pids)
+   (pgid :initarg :pgid)))
+
+(defclass lisp-job
+    (job)
+  ((exp :initarg :exp)
+   (thread :initarg :thread)
+   (result :initform nil)))
+
 (defvar *jobno-counter* 1)
-(defstruct job
-  no
-  commands
-  pids
-  pgid
-  status)
 
 (defvar *clsh-pgid* (sb-posix:getpgrp))
 (defvar *jobs* nil)
@@ -29,8 +49,8 @@
 (defvar *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr))
 (defun exec (program args)
   (let ((c-args (cffi:foreign-alloc :string
-                                                     :initial-contents args
-                                                     :null-terminated-p t)))
+                                    :initial-contents args
+                                    :null-terminated-p t)))
     (cffi:foreign-funcall "execv"
                           :string program
                           :pointer c-args
@@ -39,6 +59,7 @@
   (princ "not found command")
   (fresh-line)
   (sb-posix:exit 1))
+
 (defun tcsetpgrp (fd pgrp)
   (cffi:foreign-funcall "tcsetpgrp"
                         :int fd
@@ -59,7 +80,7 @@
         (sb-posix:close fd)
       (sb-posix:syscall-error (e) (declare (ignore e))))))
 
-(defun run-programs (cmds &key (input 0) (output 1))
+(defun run-programs (cmds &key (input 0) (output 1) (error 2))
   (do* ((now-cmds cmds (cdr now-cmds))
         (cmd (car now-cmds) (car now-cmds))
         (grpid nil)
@@ -76,51 +97,95 @@
         (progn
           (setf out-fd output)
           (setf next-in nil)))
-    (let ((pid (sb-posix:posix-fork)))
-      (if (eq pid 0)
-          (progn ;child
-            (if grpid
-                (sb-posix:setpgid 0 grpid)
-                (progn
-                  (sb-posix:setpgrp)
-                  (tcsetpgrp *tty-fd* pid)))
-            (sb-sys:default-interrupt sb-posix:sigtstp)
-            (sb-sys:default-interrupt sb-posix:sigttou)
-            (sb-sys:default-interrupt sb-posix:sigttin)
-            (unless (eq in-fd input)
-              (sb-posix:dup2 in-fd 0))
-            (unless (eq out-fd output)
-              (sb-posix:dup2 out-fd 1))
-            (close-all-fd)
-            (exec (car cmd) (cdr cmd)))
-          (progn ;parent
-            (unless grpid
-              (setf grpid pid)
-              (setf *current-job* pid))
-            (sb-posix:setpgid pid grpid)
-            (unless (eq in-fd input)
-              (sb-posix:close in-fd))
-            (unless (eq out-fd output)
-              (sb-posix:close out-fd))
-            (push pid child-pids))))))
+    (sb-thread::with-all-threads-lock
+      (let ((pid (sb-posix:posix-fork)))
+        (if (eq pid 0)
+            (progn ;child
+              #+darwin
+              (sb-posix:darwin-reinit)
+              (if grpid
+                  (sb-posix:setpgid 0 grpid)
+                  (progn
+                    (sb-posix:setpgrp)
+                    (tcsetpgrp *tty-fd* pid)))
+              (sb-sys:default-interrupt sb-posix:sigtstp)
+              (sb-sys:default-interrupt sb-posix:sigttou)
+              (sb-sys:default-interrupt sb-posix:sigttin)
+              (unless (eq in-fd input)
+                (sb-posix:dup2 in-fd 0))
+              (unless (eq out-fd output)
+                (sb-posix:dup2 out-fd 1))
+              (sb-posix:dup2 error 2)
+              (close-all-fd)
+              (exec (car cmd) (cdr cmd)))
+            (progn ;parent
+              (unless grpid
+                (setf grpid pid)
+                (setf *current-job* pid))
+              (sb-posix:setpgid pid grpid)
+              (unless (eq in-fd input)
+                (sb-posix:close in-fd))
+              (unless (eq out-fd output)
+                (sb-posix:close out-fd))
+              (push pid child-pids)))))))
 
 (defun delete-done-job (job)
   (setf *jobs* (delete job *jobs*))
   (unless *jobs*
     (setf *jobno-counter* 1)))
 
+(defun register-job (job)
+  (push job *jobs*)
+  (setf *jobno-counter* (1+ *jobno-counter*)))
+
 #+sbcl
-(defun create-job (cmds input output)
-  (multiple-value-bind (pids grpid)
-      (run-programs cmds :output output :input input)
-    (let ((proc (make-job :no *jobno-counter*
-                          :commands cmds
-                          :pids pids
-                          :pgid grpid
-                          :status 'running)))
-      (push proc *jobs*)
-      (setf *jobno-counter* (1+ *jobno-counter*))
-      proc)))
+(defun get-fd-from-stream (stream)
+  (cond ((typep stream 'synonym-stream)
+         (get-fd-from-stream (symbol-value (synonym-stream-symbol stream))))
+        ((sb-sys:fd-stream-p stream)
+         (sb-sys:fd-stream-fd stream))
+        (t nil)))
+
+#+sbcl
+(defun create-job (cmds &key (input *standard-input*) (output *standard-output*) (error *error-output*))
+  (let ((fds (mapcar (lambda (fs)
+                       (get-fd-from-stream fs))
+                     `(,input ,output ,error))))
+    (if (some #'null fds)
+        nil
+        (multiple-value-bind (pids grpid)
+            (run-programs cmds :input (first fds) :output (second fds) :error (third fds))
+          (let ((proc (make-instance
+                       'command-job
+                       :no *jobno-counter*
+                       :commands cmds
+                       :pids pids
+                       :pgid grpid
+                       :status 'running)))
+            (register-job proc)
+            proc)))))
+
+(defun create-lisp-job (exp &key (input *standard-input*) (output *standard-output*) (error *error-output*))
+  (let* ((thr (make-thread (lambda ()
+                             (block eval-cmd
+                               (handler-bind
+                                   ((error (lambda (e)
+                                             (format *error-output* "~a~%" e)
+                                             #+sbcl
+                                             (sb-debug:print-backtrace)
+                                             (return-from eval-cmd))))
+                                 (eval exp))))
+                           :initial-bindings `((*standard-input* . ,input)
+                                               (*standard-output* . ,output)
+                                               (*error-output* . ,error))))
+         (job (make-instance
+               'lisp-job
+               :no *jobno-counter*
+               :exp exp
+               :thread thr
+               :status 'running)))
+    (register-job job)
+    job))
 
 (defun status2string (status)
   (case status
@@ -129,67 +194,115 @@
     (otherwise
      (format nil "status=~a" status))))
 
-(defun show-status-message (job)
-  (format t "[~d] ~a ~{~{~a~}~^ | ~}~a~%"
-          (job-no job)
-          (status2string (job-status job))
-          (job-commands job)
-          (if (eq *current-job* job)
-              ""
-              " &")))
+(defmethod show-status-message ((job command-job))
+  (with-slots (no status commands) job
+    (format t "[~d] ~a ~{~{~a~}~^ | ~}~a~%"
+            no
+            (status2string status)
+            commands
+            (if (eq *current-job* job)
+                ""
+                " &"))))
+
+(defmethod show-status-message ((job lisp-job))
+  (with-slots (no status result) job
+      (format t "[~d] ~a result: ~s ~a~%"
+              no
+              (status2string status)
+              result
+            (if (eq *current-job* job)
+                ""
+                " &"))))
 
 #+sbcl
-(defun pick-finished-job (job)
-  (multiple-value-bind (pid status) (sb-posix:waitpid (job-pgid job) sb-posix:wnohang)
-    (when (and (eq pid (job-pgid job)) (sb-posix:wifexited status))
-      (setf (job-status job) status)
+(defmethod pick-finished-job ((job command-job))
+  (with-slots (pgid status) job
+    (multiple-value-bind (pid status) (sb-posix:waitpid pgid sb-posix:wnohang)
+      (when (and (eq pid pgid) (sb-posix:wifexited status))
+        (setf status status)
+        (show-status-message job)
+        (delete-done-job job)))))
+
+(defmethod pick-finished-job ((job lisp-job))
+  (with-slots (thread status result) job
+    (unless (thread-alive-p thread)
+      (setf result (join-thread thread))
       (show-status-message job)
       (delete-done-job job))))
 
 #+sbcl
-(defun wait-job (job)
-  (unless (eq *current-job* job)
-    (tcsetpgrp *tty-fd* (job-pgid job))
-    (setf *current-job* job))
-  (multiple-value-bind (pid status) (sb-posix:waitpid (car (job-pids job)) sb-posix:wuntraced)
-    (declare (ignore pid))
-    (tcsetpgrp *tty-fd* *clsh-pgid*)
-    (if (sb-posix:wifexited status)
-        (progn
-          (setf *last-done-job-status* status)
-          (delete-done-job job))
-        (progn
-          (setf (job-status job) 'stopped)
-          (show-status-message job)))
-    (setf *current-job* nil)))
+(defmethod wait-job ((job command-job))
+  (with-slots (pgid pids status) job
+    (unless (eq *current-job* job)
+      (tcsetpgrp *tty-fd* pgid)
+      (setf *current-job* job))
+    (multiple-value-bind (pid status) (sb-posix:waitpid (car pids) sb-posix:wuntraced)
+      (declare (ignore pid))
+      (tcsetpgrp *tty-fd* *clsh-pgid*)
+      (if (sb-posix:wifexited status)
+          (progn
+            (setf *last-done-job-status* status)
+            (delete-done-job job))
+          (progn
+            (setf status 'stopped)
+            (show-status-message job)))
+      (setf *current-job* nil))))
+
+(defmethod wait-job ((job lisp-job))
+  (with-slots (thread status result) job
+    (setf *current-job* job)
+    (setf result (join-thread thread))
+    (setf status 'finished)
+    (delete-done-job job)
+    (show-status-message job))
+  (setf *current-job* nil))
+
 #+sbcl
-(defun send-signal-to-job (job sig-no)
-  (sb-posix:killpg (job-pgid job) sig-no)
-  (let ((jobs *jobs*))
-    (setf jobs (delete job jobs))
-    (push job jobs)
-    (setf *jobs* jobs)))
+(defmethod send-signal-to-job ((job command-job) sig-no)
+  (with-slots (pgid) job
+    (sb-posix:killpg pgid sig-no)
+    (let ((jobs *jobs*))
+      (setf jobs (delete job jobs))
+      (push job jobs)
+      (setf *jobs* jobs))))
+
+;TODO need signal processing, like stopping, restart, and others
+(defmethod send-signal-to-job ((job lisp-job) sig-no)
+  (with-slots (thread) job
+    (destroy-thread thread)))
 
 (defun find-job-by-jobno (jobno)
   (find-if (lambda (job)
-             (eq (job-no job) jobno))
+             (with-slots (no) job
+               (eq no jobno)))
            jobno))
+
+(defmethod make-job-obj-active ((job command-job) foreground)
+  (with-slots (status) job
+    (progn
+      (send-signal-to-job job
+                          sb-posix:sigcont)
+      (setf status 'running)
+      (if foreground
+          (wait-job job)))))
+
+(defmethod make-job-obj-active ((job lisp-job) foreground)
+  (when foreground
+    (with-slots (status) job
+      (setf status 'running)
+      (wait-job job))))
 
 (defun make-job-active (jobno foreground)
   (let ((job (if jobno (find-job-by-jobno jobno) (car *jobs*))))
     (if job
-        (progn
-          (send-signal-to-job job
-                              sb-posix:sigcont)
-          (setf (job-status job) 'running)
-          (if foreground
-              (wait-job job)))
+        (make-job-obj-active job foreground)
         (format *error-output* "No such a job."))))
 
 (defun pick-finished-jobs ()
   (mapc (lambda (job)
           (pick-finished-job job))
         *jobs*))
+
 (defun show-jobs ()
   (mapc (lambda (job)
           (show-status-message job))

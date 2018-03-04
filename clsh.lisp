@@ -22,9 +22,9 @@
   (string/= (string-trim " " x)
             (string-trim " " y)))
 
-(defun package-symbols-in-current ()
+(defun package-symbols (package)
   (let ((pkgs nil))
-    (do-symbols (pkg *package* pkgs)
+    (do-symbols (pkg package pkgs)
       (push pkg pkgs))))
 
 (defun package-external-symbols (package)
@@ -53,7 +53,7 @@
 #+sbcl
 (defun executable-p (path)
   (handler-case
-      (progn (sb-posix:access path sb-posix:x-ok)
+      (progn (sb-posix:access (namestring path) sb-posix:x-ok)
              t)
     (sb-posix:syscall-error (e) (declare (ignore e)) nil)))
 
@@ -68,8 +68,7 @@
                    (progn
                      (format t "not found \"~a\" command~%" cmd)
                      (return-from run-program-no-wait nil)))))
-           cmds)
-   0 1))
+           cmds)))
 
 (defun run-program-wait (cmds &key (input t))
   (let* ((os (make-string-output-stream))
@@ -90,32 +89,41 @@
                                              ':output :stream))
                                   (setf (readtable-case *readtable*) :upcase))))
 
+(defun pass-prefix (text lst &key (ignore-case nil))
+  (remove-if-not (lambda (target)
+                   (starts-with-subseq text target :test (if ignore-case #'equalp #'equal)))
+                 lst))
+
 ;;; Define and register function that does custom completion: if user enters
 ;;; first word, it will be completed as a verb, second and later words will
 ;;; be completed as fruits.
-(defun complete (comp-list text start end)
+(defun common-prefix (items &key (ignore-case nil))
+  (let ((compare-func (if ignore-case
+                          #'char-equal
+                          #'char=)))
+    (subseq
+     (car items) 0
+     (position
+      nil
+      (mapcar
+       (lambda (i)
+         (every (lambda (x)
+                  (funcall compare-func
+                           (char (car items) i)
+                           (char x           i)))
+                (cdr items)))
+       (iota (reduce #'min (mapcar #'length items))))))))
+
+(defun complete-by-list (comp-list text start end &key (ignore-case nil))
   (declare (ignore start end))
-  (labels ((common-prefix (items)
-             (subseq
-              (car items) 0
-              (position
-               nil
-               (mapcar
-                (lambda (i)
-                  (every (lambda (x)
-                           (char= (char (car items) i)
-                                  (char x           i)))
-                         (cdr items)))
-                (iota (reduce #'min (mapcar #'length items)))))))
-           (select-completions (list)
-             (let ((els (remove-if-not (curry #'starts-with-subseq text)
-                                       list)))
+  (labels ((select-completions (list)
+             (let ((els (pass-prefix text list :ignore-case ignore-case)))
                (if (cdr els)
-                   (cons (common-prefix els) els)
+                   (cons (common-prefix els :ignore-case ignore-case) els)
                    els))))
     (select-completions comp-list)))
 
-;notice: destrucvice!!
+;notice: destructive!!
 (defun sort-by-length (lst)
   (sort lst (lambda (x y) (< (length x) (length y)))))
 
@@ -127,29 +135,114 @@
     (mapc (lambda (p)
             (mapc (lambda (f)
                     (when (executable-p f)
-                      (let ((name (pathname-name f)))
+                      (when-let ((name (pathname-name f)))
                         (setf (gethash name *command-hash*) f)
                         (push name command-list))))
-                  (directory p)))
+                  (directory p :resolve-symlinks nil)))
           paths)
     (setf *command-list* (sort-by-length command-list))))
 
+(defun abs-path-specified-p (name)
+  (ppcre:scan "^/" name))
+
+(defun get-complete-list-filename (text)
+  (let ((p (remove-if-not (lambda (x) (starts-with-subseq text (namestring x)))
+                          (directory (make-pathname :name :wild :type :wild
+                                                    :directory (pathname-directory (pathname text)))
+                                     :resolve-symlinks nil))))
+    (if (or (null p) (rest p) (pathname-name (first p)))
+        p
+        (get-complete-list-filename (namestring (first p))))))
+
+(defun described-path-to-abs (path)
+  (handler-case
+      (let* ((orig-path (ppcre:regex-replace "([^/]*)$" path ""))
+             (abs-pathname (truename orig-path))
+             (dir-string (namestring abs-pathname)))
+        (values orig-path
+                dir-string
+                (concatenate 'string dir-string (ppcre:scan-to-strings "([^/]+)$" path))))
+    (sb-int:simple-file-error ()
+      nil)))
+
+;TODO ソースが汚いので要リファクタリング
 (defun complete-list-filename (text start end)
   (declare (ignore start end))
-  (sort-by-length (mapcar #'namestring (directory (pathname text)))))
+  (multiple-value-bind (orig-path abs-path comp-str)
+      (described-path-to-abs text)
+    (when orig-path
+      (let ((cmp-lst (mapcar (lambda (x)
+                               (ppcre:regex-replace (concatenate 'string "^" abs-path)
+                                                  (namestring x)
+                                                  orig-path))
+                             (get-complete-list-filename comp-str))))
+        (when cmp-lst
+          (cons (common-prefix cmp-lst) cmp-lst))))))
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
     (if (< 1 (length (first (nreverse p))))
         (complete-list-filename text start end)
-        *command-list*)))
+        (if (or (ppcre:scan "/" text) (and (not (null p))  (equal text "")))
+            (complete-list-filename text start end)
+            (complete-by-list *command-list* text start end)))))
+
+(defun all-symbol-name-list-in-package (package &key has-package-name external)
+  (mapcar (lambda (p) (concatenate 'string
+                                   (when has-package-name (package-name package))
+                                   (cond ((not has-package-name)
+                                          "")
+                                         (external
+                                          ":")
+                                         (t
+                                          "::"))
+                                   (symbol-name p)))
+          (if external
+              (package-external-symbols package)
+              (package-symbols package))))
+
+(defun all-package-name-list ()
+  (reduce (lambda (accum p)
+            (nconc
+             (mapcar (lambda (pn)
+                       (concatenate 'string pn ":"))
+                     (cons (package-name p) (package-nicknames p)))
+             accum))
+          (list-all-packages)
+          :initial-value nil))
+
+(defun complete-list-for-lisp (text start end)
+  (multiple-value-bind (s e sa ea)
+      (ppcre:scan "([^:]+)(:{1,2})" text)
+    (declare (ignore e))
+    (if (null s)
+        (let ((comp-lst (complete-by-list
+                         (sort-by-length
+                          (nconc (all-symbol-name-list-in-package *package*)
+                                 (all-package-name-list)))
+                         text start end :ignore-case t)))
+          (if (and (not (rest comp-lst)) (ppcre:scan ":$" (first comp-lst)))
+              (complete-list-for-lisp (first comp-lst) start end)
+              comp-lst))
+        (let ((package-name (subseq text (svref sa 0) (svref ea 0)))
+              (all-symbol? (= (- (svref ea 1) (svref sa 1)) 1)))
+          (complete-by-list
+           (sort-by-length
+            (let ((p (find-package (intern (string-upcase package-name) "KEYWORD"))))
+              (when p
+                (mapcar (lambda (x)
+                          (ppcre:regex-replace (concatenate 'string "^" (package-name p) ":")
+                                               x
+                                               (concatenate 'string (string-upcase package-name) ":")))
+                        (all-symbol-name-list-in-package p
+                                                         :has-package-name t
+                                                         :external all-symbol?)))))
+           text start end :ignore-case t)))))
 
 (defun complete-cmdline (text start end)
-  (complete
-   (if (lisp-syntax-p rl:*line-buffer*)
-       (sort-by-length (mapcar #'symbol-name (package-symbols-in-current)))
-       (complete-list-for-command text start end))
-   text start end))
+  (if (lisp-syntax-p rl:*line-buffer*)
+      (complete-list-for-lisp text start end)
+      (complete-list-for-command text start end)))
 
 (rl:register-function :complete #'complete-cmdline)
 
@@ -198,20 +291,24 @@
   (do ((i 0 (1+ i))
        (text ""))
       (nil)
-    (handler-case
-        (progn
-          (setf text
-                (rl:readline :prompt (funcall *prompt-function* i)
-                             :add-history t
-                             :novelty-check #'novelty-check))
-          (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
-                ((lisp-syntax-p text)
-                 (print (eval (read-from-string text)))
-                 (fresh-line))
-                (t
-                 (cmdline-execute text)))
-          (pick-finished-jobs))
-      (error (c) (format *error-output* "~a~%" c))
-      (sb-sys:interactive-interrupt (i) (format *error-output* "~a~%" i)))))
+    (handler-bind
+        ((sb-sys:interactive-interrupt (lambda (i)
+                                         (format *error-output* "~%~a~%" i)
+                                         (go cmd-loop))))
+      (setf text
+        (rl:readline :prompt (funcall *prompt-function* i)
+                     :add-history t
+                     :novelty-check #'novelty-check))
+      (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
+            ((lisp-syntax-p text)
+             (wait-job (create-lisp-job (read-from-string text))))
+            (t
+             (cmdline-execute text)))
+      (pick-finished-jobs))
+   cmd-loop))
 
 (load #p"commands.lisp")
+
+(in-package :common-lisp-user)
+(defun v (x) x)
+(export 'v)
