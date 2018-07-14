@@ -68,7 +68,7 @@
    (=tilda-expansion)
    (=string-with-backslash)))
 
-(defun =comnand-as-shell ()
+(defun =command-as-shell ()
   (=destructure (cmd args)
       (=list
        (=words)
@@ -85,10 +85,10 @@
    (%or
     (%some (?not (?char #\()))
     (%maybe '=lisp-expression/parser))
-   (?cgar #\))
+   (?char #\))
    ))
 
-(setf (fdefinition =lisp-expression/parser) (=lisp-expression))
+(setf (fdefinition '=lisp-expression/parser) (=lisp-expression))
 
 (defun =command-as-lisp ()
   (cons 'lisp
