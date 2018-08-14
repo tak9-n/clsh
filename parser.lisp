@@ -77,7 +77,7 @@
             (=list
              (?some-whitespace)
              (=string)))))
-    (cons 'shell (cons cmd args))))
+    `(shell ,cmd ,args)))
 
 (defun =lisp-expression ()
   (=list
@@ -91,9 +91,9 @@
 (setf (fdefinition '=lisp-expression/parser) (=lisp-expression))
 
 (defun =command-as-lisp ()
-  (cons 'lisp
-        (=subseq
-         (=lisp-expression))))
+  (=destructure (exp)
+      (=lisp-expression)
+    `(lisp ,exp)))
 
 (defun =command ()
   (%or (=command-as-lisp)
