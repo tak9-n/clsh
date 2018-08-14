@@ -80,20 +80,23 @@
     `(shell ,cmd ,args)))
 
 (defun =lisp-expression ()
-  (=list
-   (?char #\()
-   (%or
-    (%some (?not (?char #\()))
-    (%maybe '=lisp-expression/parser))
-   (?char #\))
-   ))
+  (=subseq
+   (=list
+    (?char #\()
+    (?any-whitespace)
+    (%or
+     (=subseq (%some (?not (?char #\)))))
+     '=lisp-expression/parser)
+    (?any-whitespace)
+    (?char #\))
+    )))
 
 (setf (fdefinition '=lisp-expression/parser) (=lisp-expression))
 
 (defun =command-as-lisp ()
-  (=destructure (exp)
-      (=lisp-expression)
-    `(lisp ,exp)))
+  (=transform (=lisp-expression)
+              (lambda (exp)
+                `(lisp ,exp))))
 
 (defun =command ()
   (%or (=command-as-lisp)
