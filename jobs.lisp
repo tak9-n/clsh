@@ -3,8 +3,7 @@
 (defpackage clsh.jobs
   (:use common-lisp cffi bordeaux-threads)
   (:export
-   create-job
-   create-lisp-job
+   create-jobs
    wait-job
    make-job-active
    pick-finished-jobs
@@ -56,7 +55,7 @@
                           :pointer c-args
                           :int)
     (cffi:foreign-free c-args))
-  (princ "not found command")
+  (format t "not found command ~a" program)
   (fresh-line)
   (sb-posix:exit 1))
 
@@ -147,18 +146,18 @@
         (t nil)))
 
 #+sbcl
-(defun create-job (cmds &key (input *standard-input*) (output *standard-output*) (error *error-output*))
+(defun create-command-job (cmd-array &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (let ((fds (mapcar (lambda (fs)
                        (get-fd-from-stream fs))
                      `(,input ,output ,error))))
     (if (some #'null fds)
         nil
         (multiple-value-bind (pids grpid)
-            (run-programs cmds :input (first fds) :output (second fds) :error (third fds))
+            (run-programs cmd-array :input (first fds) :output (second fds) :error (third fds))
           (let ((proc (make-instance
                        'command-job
                        :no *jobno-counter*
-                       :commands cmds
+                       :commands cmd-array
                        :pids pids
                        :pgid grpid
                        :status 'running)))
@@ -307,3 +306,50 @@
   (mapc (lambda (job)
           (show-status-message job))
         *jobs*))
+
+(defun parse-shell-to-lisp (shell-lst)
+  (format nil "~w" shell-lst))
+
+(defun run-external-command (cmds &key (input 0) (output :stream))
+  (declare (ignore input output)) ;TODO remove when implement command pipe.
+  (create-command-job
+   (mapcar (lambda (cmd-spec)
+             (let* ((cmd (first cmd-spec))
+                    (path-cmd (command-with-path cmd *command-hash*)))
+               (if (and path-cmd (executable-p path-cmd))
+                   (cons path-cmd cmd-spec)
+                   (progn
+                     (format t "not found \"~a\" command~%" cmd)
+                     (return-from run-external-command nil)))))
+           cmds)))
+
+(defun create-jobs (cmds bg-flag)
+  (let ((last-job nil))
+    (mapc (lambda (cmds)
+            (setf last-job
+                  (case (first cmds)
+                    ('clsh.parser:lisp
+                     (create-lisp-job (cadr cmds)))
+                    ('clsh.parser:shell
+                     (let ((func-sym (clsh:find-command-symbal (first cmds))))
+                       (if (fboundp func-sym)
+                           (create-lisp-job
+                            (parse-shell-to-lisp))
+                           (run-external-command (rest cmds))))))
+                  ))
+          cmds)
+    (unless bg-flag
+      (wait-job last-job))))
+
+;; TODO 以下実装保留
+;; (set-macro-character #\] (get-macro-character #\)))
+;; (set-dispatch-macro-character #\# #\[
+;;                               (lambda (stream char1 char2)
+;;                                 (declare (ignore char1 char2))
+;;                                 (setf (readtable-case *readtable*) :preserve)
+;;                                 (unwind-protect
+;;                                      (let ((command-line (read-delimited-list #\] stream t)))
+;;                                        (list 'run-program-no-wait (princ-to-string (car command-line))
+;;                                              `',(mapcar #'princ-to-string (rest command-line))
+;;                                              ':output :stream))
+;;                                   (setf (readtable-case *readtable*) :upcase))))

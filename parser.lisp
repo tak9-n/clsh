@@ -7,7 +7,9 @@
         maxpc
         maxpc.char)
   (:export parse-cmdline
-           parse-command-string))
+           parse-command-string
+           lisp
+           shell))
 (in-package clsh.parser)
 
 (defun ?some-whitespace ()
@@ -77,7 +79,7 @@
             (=list
              (?some-whitespace)
              (=string)))))
-    `(shell ,cmd ,args)))
+    `(shell ,(cons cmd args))))
 
 (defun =lisp-expression ()
   (=subseq

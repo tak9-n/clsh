@@ -2,8 +2,8 @@
 (require :cl-readline)
 (require :cl-ppcre)
 
-(load #P"jobs.lisp")
 (load #P"parser.lisp")
+(load #P"jobs.lisp")
 
 (defpackage clsh
   (:use    common-lisp
@@ -56,38 +56,6 @@
       (progn (sb-posix:access (namestring path) sb-posix:x-ok)
              t)
     (sb-posix:syscall-error (e) (declare (ignore e)) nil)))
-
-(defun run-program-no-wait (cmds &key (input 0) (output :stream))
-  (declare (ignore input output)) ;TODO remove when implement command pipe.
-  (create-job
-   (mapcar (lambda (cmd-spec)
-             (let* ((cmd (first cmd-spec))
-                    (path-cmd (command-with-path cmd *command-hash*)))
-               (if (and path-cmd (executable-p path-cmd))
-                   (cons path-cmd cmd-spec)
-                   (progn
-                     (format t "not found \"~a\" command~%" cmd)
-                     (return-from run-program-no-wait nil)))))
-           cmds)))
-
-(defun run-program-wait (cmds &key (input t))
-  (let* ((os (make-string-output-stream))
-         (job (run-program-no-wait cmds :input input :output os)))
-    (when job
-        (wait-job job)
-        (get-output-stream-string os))))
-
-(set-macro-character #\] (get-macro-character #\)))
-(set-dispatch-macro-character #\# #\[
-                              (lambda (stream char1 char2)
-                                (declare (ignore char1 char2))
-                                (setf (readtable-case *readtable*) :preserve)
-                                (unwind-protect
-                                     (let ((command-line (read-delimited-list #\] stream t)))
-                                       (list 'run-program-no-wait (princ-to-string (car command-line))
-                                             `',(mapcar #'princ-to-string (rest command-line))
-                                             ':output :stream))
-                                  (setf (readtable-case *readtable*) :upcase))))
 
 (defun pass-prefix (text lst &key (ignore-case nil))
   (remove-if-not (lambda (target)
@@ -264,19 +232,6 @@
         sym
         nil)))
 
-(defun cmdline-execute (line)
-  (let* ((p (clsh.parser:parse-cmdline line))
-         (cmds (cdr p))
-         (bg-flg (car p))
-         (func-sym (find-command-symbol (caar cmds))))
-    (if (fboundp func-sym)
-        (progn
-          (apply func-sym (cdar cmds))
-          (fresh-line))
-        (if bg-flg
-            (run-program-no-wait cmds)
-            (princ (run-program-wait cmds))))))
-
 (defvar *prompt-function*
   (lambda (count)
     (declare (ignore count))
@@ -299,11 +254,16 @@
         (rl:readline :prompt (funcall *prompt-function* i)
                      :add-history t
                      :novelty-check #'novelty-check))
-      (cond ((or (ppcre:scan "^ 	*$" text) (= (length text) 0))) ;do nothing
-            ((lisp-syntax-p text)
-             (wait-job (create-lisp-job (read-from-string text))))
-            (t
-             (cmdline-execute text)))
+      (multiple-value-bind (result match-p end-p)
+          (clsh.parser:parse-cmdline text)
+        (cond ((and match-p end-p)
+               (clsh.jobs:create-jobs (cdr result) (car result)))
+              (match-p
+                                        ;to next line
+               )
+              (t
+                                        ;error
+               )))
       (pick-finished-jobs))
    cmd-loop))
 
