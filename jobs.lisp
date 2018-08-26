@@ -3,7 +3,7 @@
 (defpackage clsh.jobs
   (:use common-lisp alexandria clsh.external-command cffi bordeaux-threads)
   (:export
-   create-jobs
+   create-job
    wait-job
    make-job-active
    pick-finished-jobs
@@ -59,7 +59,7 @@
         (t nil)))
 
 #+sbcl
-(defun create-command-job (cmd-array &key (input *standard-input*) (output *standard-output*) (error *error-output*))
+(defun create-command-task (cmd-array &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (let ((fds (mapcar (lambda (fs)
                        (get-fd-from-stream fs))
                      `(,input ,output ,error))))
@@ -76,7 +76,7 @@
           (register-job proc)
           proc))))
 
-(defun create-lisp-job (exp &key (input *standard-input*) (output *standard-output*) (error *error-output*))
+(defun create-lisp-task (exp &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (let* ((thr (make-thread (lambda ()
                              (block eval-cmd
                                (handler-bind
@@ -241,7 +241,7 @@
              cmds)
      executable)))
 
-(defun create-jobs (cmds bg-flag)
+(defun create-job (cmds bg-flag)
   (multiple-value-bind (trans-cmds result)
       (check-command-executable cmds)
     (when result
@@ -250,9 +250,9 @@
                 (setf created-job
                       (case (first cmd)
                         (clsh.parser:lisp
-                         (create-lisp-job (cadr cmd)))
+                         (create-lisp-task (cadr cmd)))
                         (clsh.parser:shell
-                         (create-command-job (cadr cmd))))
+                         (create-command-task (cadr cmd))))
                       ))
               trans-cmds)
         (unless bg-flag

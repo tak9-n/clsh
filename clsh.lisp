@@ -219,7 +219,7 @@
       (multiple-value-bind (result match-p end-p)
           (clsh.parser:parse-cmdline text)
         (cond ((and match-p end-p)
-               (clsh.jobs:create-jobs (cdr result) (car result)))
+               (clsh.jobs:create-job (cdr result) (car result)))
               (match-p
                                         ;to next line
                )
