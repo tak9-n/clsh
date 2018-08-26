@@ -6,6 +6,7 @@
 (load #P"parser.lisp")
 (load #P"external_command.lisp")
 (load #P"jobs.lisp")
+(load #p"commands.lisp")
 
 (defpackage clsh
   (:use    common-lisp
@@ -201,6 +202,7 @@
             (package-name *package*))))
 
 (defun run ()
+  (push (lambda () (write-history)) clsh.commands:*exit-hook*)
   (read-history)
   (clsh.external-command:build-command-hash)
   (do ((i 0 (1+ i))
@@ -226,8 +228,6 @@
                )))
       (pick-finished-jobs))
    cmd-loop))
-
-(load #p"commands.lisp")
 
 (in-package :common-lisp-user)
 (defun v (x) x)

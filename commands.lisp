@@ -1,17 +1,18 @@
 (defpackage clsh.commands
   (:use    common-lisp
-           clsh
            clsh.jobs)
-  (:export exit cd fg bg jobs))
+  (:export exit cd fg bg jobs *exit-hook*))
 
 (in-package clsh.commands)
 
 (defvar *before-directory* nil)
+(defvar *exit-hook* nil)
 
 #+sbcl
 (defun exit ()
-  (clsh::write-history)
-  (sb-ext:exit))
+  (mapc (lambda (x) (funcall x)) *exit-hook*)
+  (sb-posix:exit 0))
+
 #+sbcl
 (defun cd (&optional dir)
   (let ((dir-to-move (if (equal dir "-")
