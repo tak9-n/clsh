@@ -2,16 +2,22 @@
 (require :cl-readline)
 (require :cl-ppcre)
 
+(load #P"utils.lisp")
 (load #P"parser.lisp")
+(load #P"external_command.lisp")
 (load #P"jobs.lisp")
 
 (defpackage clsh
   (:use    common-lisp
            alexandria
-           clsh.jobs)
-  (:export run *prompt-function*))
+           clsh.jobs
+           clsh.utils)
+  (:export
+   run
+   *prompt-function*
+  ))
 
-(in-package :clsh)
+(in-package clsh)
 
 (defconstant +history-file+ (merge-pathnames (user-homedir-pathname) #p".clsh_history"))
 
@@ -32,30 +38,6 @@
     (do-external-symbols
         (pkg package pkgs)
       (push pkg pkgs))))
-
-(defvar *command-list* nil)
-(defvar *command-hash* nil)
-
-(defun lisp-syntax-p (text)
-  (ppcre:scan "^[ 	]*\\(" text))
-
-(defun command-path-specified-p (cmd)
-  (ppcre:scan "/" cmd))
-
-(defun command-with-path (cmd hash)
-  (if (command-path-specified-p cmd)
-      cmd
-      (let ((cmd-path (gethash cmd hash nil)))
-        (if cmd-path
-            (namestring cmd-path)
-            nil))))
-
-#+sbcl
-(defun executable-p (path)
-  (handler-case
-      (progn (sb-posix:access (namestring path) sb-posix:x-ok)
-             t)
-    (sb-posix:syscall-error (e) (declare (ignore e)) nil)))
 
 (defun pass-prefix (text lst &key (ignore-case nil))
   (remove-if-not (lambda (target)
@@ -90,25 +72,6 @@
                    (cons (common-prefix els :ignore-case ignore-case) els)
                    els))))
     (select-completions comp-list)))
-
-;notice: destructive!!
-(defun sort-by-length (lst)
-  (sort lst (lambda (x y) (< (length x) (length y)))))
-
-(defun build-command-hash ()
-  (let ((paths (mapcar (lambda (ps) (make-pathname :directory ps :name :wild))
-                       (ppcre:split ":" (sb-posix:getenv "PATH"))))
-        (command-list))
-    (setf *command-hash* (make-hash-table :test #'equal))
-    (mapc (lambda (p)
-            (mapc (lambda (f)
-                    (when (executable-p f)
-                      (when-let ((name (pathname-name f)))
-                        (setf (gethash name *command-hash*) f)
-                        (push name command-list))))
-                  (directory p :resolve-symlinks nil)))
-          paths)
-    (setf *command-list* (sort-by-length command-list))))
 
 (defun abs-path-specified-p (name)
   (ppcre:scan "^/" name))
@@ -153,7 +116,7 @@
         (complete-list-filename text start end)
         (if (or (ppcre:scan "/" text) (and (not (null p))  (equal text "")))
             (complete-list-filename text start end)
-            (complete-by-list *command-list* text start end)))))
+            (complete-by-list clsh.external-command:*command-list* text start end)))))
 
 (defun all-symbol-name-list-in-package (package &key has-package-name external)
   (mapcar (lambda (p) (concatenate 'string
@@ -208,9 +171,13 @@
            text start end :ignore-case t)))))
 
 (defun complete-cmdline (text start end)
-  (if (lisp-syntax-p rl:*line-buffer*)
-      (complete-list-for-lisp text start end)
-      (complete-list-for-command text start end)))
+  (multiple-value-bind (result match-p end-p)
+      (clsh.parser:parse-command-string rl:*line-buffer*)
+    (declare (ignore match-p end-p))
+    (let ((last-sep (car (nreverse result))))
+      (if (eq (first last-sep) 'clsh.parser:lisp)
+          (complete-list-for-lisp text start end)
+          (complete-list-for-command text start end)))))
 
 (rl:register-function :complete #'complete-cmdline)
 
@@ -225,13 +192,6 @@
 (defun write-history ()
   (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
 
-(defun find-command-symbol (cmd)
-  (multiple-value-bind (sym statsu)
-      (find-symbol (string-upcase cmd) 'clsh.commands)
-    (if (eq statsu :external)
-        sym
-        nil)))
-
 (defvar *prompt-function*
   (lambda (count)
     (declare (ignore count))
@@ -242,7 +202,7 @@
 
 (defun run ()
   (read-history)
-  (build-command-hash)
+  (clsh.external-command:build-command-hash)
   (do ((i 0 (1+ i))
        (text ""))
       (nil)

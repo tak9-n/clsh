@@ -1,7 +1,7 @@
 (require :bordeaux-threads)
 
 (defpackage clsh.jobs
-  (:use common-lisp cffi bordeaux-threads)
+  (:use common-lisp alexandria clsh.external-command cffi bordeaux-threads)
   (:export
    create-jobs
    wait-job
@@ -41,93 +41,6 @@
 (defvar *last-done-job-status* nil)
 (defvar *current-job* nil)
 
-(sb-sys:ignore-interrupt sb-posix:sigttou)
-(sb-sys:ignore-interrupt sb-posix:sigttin)
-(sb-sys:ignore-interrupt sb-posix:sigtstp)
-
-(defvar *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr))
-(defun exec (program args)
-  (let ((c-args (cffi:foreign-alloc :string
-                                    :initial-contents args
-                                    :null-terminated-p t)))
-    (cffi:foreign-funcall "execv"
-                          :string program
-                          :pointer c-args
-                          :int)
-    (cffi:foreign-free c-args))
-  (format t "not found command ~a" program)
-  (fresh-line)
-  (sb-posix:exit 1))
-
-(defun tcsetpgrp (fd pgrp)
-  (cffi:foreign-funcall "tcsetpgrp"
-                        :int fd
-                        :int pgrp
-                        :int))
-(defun tcgetpgrp (fd)
-  (cffi:foreign-funcall "tcgetpgrp"
-                        :int fd
-                        :int))
-(defun getdtablesize ()
-  (cffi:foreign-funcall "getdtablesize"
-                        :int))
-
-(defun close-all-fd ()
-  (do ((fd (getdtablesize) (1- fd)))
-      ((< fd 3))
-    (handler-case
-        (sb-posix:close fd)
-      (sb-posix:syscall-error (e) (declare (ignore e))))))
-
-(defun run-programs (cmds &key (input 0) (output 1) (error 2))
-  (do* ((now-cmds cmds (cdr now-cmds))
-        (cmd (car now-cmds) (car now-cmds))
-        (grpid nil)
-        (next-in)
-        (out-fd)
-        (in-fd input next-in)
-        (child-pids))
-       ((null now-cmds) (values child-pids grpid))
-    (if (cdr now-cmds)
-        (multiple-value-bind (p-in p-out)
-            (sb-posix:pipe)
-          (setf out-fd p-out)
-          (setf next-in p-in))
-        (progn
-          (setf out-fd output)
-          (setf next-in nil)))
-    (sb-thread::with-all-threads-lock
-      (let ((pid (sb-posix:posix-fork)))
-        (if (eq pid 0)
-            (progn ;child
-              #+darwin
-              (sb-posix:darwin-reinit)
-              (if grpid
-                  (sb-posix:setpgid 0 grpid)
-                  (progn
-                    (sb-posix:setpgrp)
-                    (tcsetpgrp *tty-fd* pid)))
-              (sb-sys:default-interrupt sb-posix:sigtstp)
-              (sb-sys:default-interrupt sb-posix:sigttou)
-              (sb-sys:default-interrupt sb-posix:sigttin)
-              (unless (eq in-fd input)
-                (sb-posix:dup2 in-fd 0))
-              (unless (eq out-fd output)
-                (sb-posix:dup2 out-fd 1))
-              (sb-posix:dup2 error 2)
-              (close-all-fd)
-              (exec (car cmd) (cdr cmd)))
-            (progn ;parent
-              (unless grpid
-                (setf grpid pid)
-                (setf *current-job* pid))
-              (sb-posix:setpgid pid grpid)
-              (unless (eq in-fd input)
-                (sb-posix:close in-fd))
-              (unless (eq out-fd output)
-                (sb-posix:close out-fd))
-              (push pid child-pids)))))))
-
 (defun delete-done-job (job)
   (setf *jobs* (delete job *jobs*))
   (unless *jobs*
@@ -152,17 +65,16 @@
                      `(,input ,output ,error))))
     (if (some #'null fds)
         nil
-        (multiple-value-bind (pids grpid)
-            (run-programs cmd-array :input (first fds) :output (second fds) :error (third fds))
-          (let ((proc (make-instance
-                       'command-job
-                       :no *jobno-counter*
-                       :commands cmd-array
-                       :pids pids
-                       :pgid grpid
-                       :status 'running)))
-            (register-job proc)
-            proc)))))
+        (let* ((pid (run-external-command cmd-array :input (first fds) :output (second fds) :error (third fds)))
+               (proc (make-instance
+                      'command-job
+                      :no *jobno-counter*
+                      :commands cmd-array
+                      :pids (list pid)
+                      :pgid pid ;todo
+                      :status 'running)))
+          (register-job proc)
+          proc))))
 
 (defun create-lisp-job (exp &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (let* ((thr (make-thread (lambda ()
@@ -173,7 +85,7 @@
                                              #+sbcl
                                              (sb-debug:print-backtrace)
                                              (return-from eval-cmd))))
-                                 (eval exp))))
+                                 (eval (read-from-string exp)))))
                            :initial-bindings `((*standard-input* . ,input)
                                                (*standard-output* . ,output)
                                                (*error-output* . ,error))))
@@ -233,11 +145,11 @@
 (defmethod wait-job ((job command-job))
   (with-slots (pgid pids status) job
     (unless (eq *current-job* job)
-      (tcsetpgrp *tty-fd* pgid)
+      (set-current-pgid pgid)
       (setf *current-job* job))
     (multiple-value-bind (pid status) (sb-posix:waitpid (car pids) sb-posix:wuntraced)
       (declare (ignore pid))
-      (tcsetpgrp *tty-fd* *clsh-pgid*)
+      (clsh.external-command:set-current-pgid *clsh-pgid*)
       (if (sb-posix:wifexited status)
           (progn
             (setf *last-done-job-status* status)
@@ -310,36 +222,41 @@
 (defun parse-shell-to-lisp (shell-lst)
   (format nil "~w" shell-lst))
 
-(defun run-external-command (cmds &key (input 0) (output :stream))
-  (declare (ignore input output)) ;TODO remove when implement command pipe.
-  (create-command-job
-   (mapcar (lambda (cmd-spec)
-             (let* ((cmd (first cmd-spec))
-                    (path-cmd (command-with-path cmd *command-hash*)))
-               (if (and path-cmd (executable-p path-cmd))
-                   (cons path-cmd cmd-spec)
-                   (progn
-                     (format t "not found \"~a\" command~%" cmd)
-                     (return-from run-external-command nil)))))
-           cmds)))
+(defun check-command-executable (cmds)
+  (let ((executable t))
+    (values 
+     (mapcar (lambda (cmd)
+               (case (first cmd)
+                 (clsh.parser:shell
+                  (let ((func-sym (clsh.utils:find-command-symbol (caadr cmd))))
+                    (if (fboundp func-sym)
+                        (list 'clsh.parser:lisp
+                              (parse-shell-to-lisp (cons func-sym (cdadr cmd))))
+                        (if-let (it (clsh.external-command:lookup-external-command cmd))
+                          it
+                          (setf executable nil)))))
+                 (otherwise
+                  cmd)
+                 ))
+             cmds)
+     executable)))
 
 (defun create-jobs (cmds bg-flag)
-  (let ((last-job nil))
-    (mapc (lambda (cmds)
-            (setf last-job
-                  (case (first cmds)
-                    ('clsh.parser:lisp
-                     (create-lisp-job (cadr cmds)))
-                    ('clsh.parser:shell
-                     (let ((func-sym (clsh:find-command-symbal (first cmds))))
-                       (if (fboundp func-sym)
-                           (create-lisp-job
-                            (parse-shell-to-lisp))
-                           (run-external-command (rest cmds))))))
-                  ))
-          cmds)
-    (unless bg-flag
-      (wait-job last-job))))
+  (multiple-value-bind (trans-cmds result)
+      (check-command-executable cmds)
+    (when result
+      (let ((created-job nil))
+        (mapc (lambda (cmd)
+                (setf created-job
+                      (case (first cmd)
+                        (clsh.parser:lisp
+                         (create-lisp-job (cadr cmd)))
+                        (clsh.parser:shell
+                         (create-command-job (cadr cmd))))
+                      ))
+              trans-cmds)
+        (unless bg-flag
+          (wait-job created-job))))))
 
 ;; TODO 以下実装保留
 ;; (set-macro-character #\] (get-macro-character #\)))
