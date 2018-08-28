@@ -11,25 +11,26 @@
 
 (in-package clsh.jobs)
 
-(defgeneric wait-job (job))
-(defgeneric make-job-obj-active (job foreground))
-(defgeneric show-status-message (job))
-(defgeneric pick-finished-job (job))
-(defgeneric send-signal-to-job (job sig-no))
+(defgeneric wait-task (job))
+(defgeneric make-task-obj-active (job foreground))
+(defgeneric pick-finished-task (job))
+(defgeneric send-signal-to-task (job sig-no))
 
-(defclass job
-    ()
-  ((no :initarg :no)
+(defstruct job
+  (no)
+  (tasks)
+  (pids)
+  (tids)
+  (status))
+
+(defclass task ())
+
+(defclass command-task (task)
+  ((command :initarg :command)
+   (pid :initarg :pid)
    (status :initarg :status)))
 
-(defclass command-job
-    (job)
-  ((commands :initarg :commands)
-   (pids :initarg :pids)
-   (pgid :initarg :pgid)))
-
-(defclass lisp-job
-    (job)
+(defclass lisp-task (task)
   ((exp :initarg :exp)
    (thread :initarg :thread)
    (result :initform nil)))
@@ -67,12 +68,9 @@
         nil
         (let* ((pid (run-external-command cmd-array :input (first fds) :output (second fds) :error (third fds)))
                (proc (make-instance
-                      'command-job
-                      :no *jobno-counter*
-                      :commands cmd-array
-                      :pids (list pid)
-                      :pgid pid ;todo
-                      :status 'running)))
+                      'command-task
+                      :command cmd-array
+                      :pid pid)))
           (register-job proc)
           proc))))
 
@@ -90,11 +88,9 @@
                                                (*standard-output* . ,output)
                                                (*error-output* . ,error))))
          (job (make-instance
-               'lisp-job
-               :no *jobno-counter*
+               'lisp-task
                :exp exp
-               :thread thr
-               :status 'running)))
+               :thread thr))))
     (register-job job)
     job))
 
@@ -105,46 +101,34 @@
     (otherwise
      (format nil "status=~a" status))))
 
-(defmethod show-status-message ((job command-job))
-  (with-slots (no status commands) job
+(defun show-status-message (job)
+  (with-slots (no status tasks) job
     (format t "[~d] ~a ~{~{~a~}~^ | ~}~a~%"
             no
             (status2string status)
-            commands
-            (if (eq *current-job* job)
-                ""
-                " &"))))
-
-(defmethod show-status-message ((job lisp-job))
-  (with-slots (no status result) job
-      (format t "[~d] ~a result: ~s ~a~%"
-              no
-              (status2string status)
-              result
+            tasks
             (if (eq *current-job* job)
                 ""
                 " &"))))
 
 #+sbcl
-(defmethod pick-finished-job ((job command-job))
-  (with-slots (pgid status) job
-    (multiple-value-bind (pid status) (sb-posix:waitpid pgid sb-posix:wnohang)
-      (when (and (eq pid pgid) (sb-posix:wifexited status))
-        (setf status status)
-        (show-status-message job)
-        (delete-done-job job)))))
+(defmethod pick-finished-task ((first-task command-task))
+  (with-slots (pid status) first-task
+    (multiple-value-bind (w-pid w-status) (sb-posix:waitpid pid sb-posix:wnohang)
+      (sb-posix:wifexited w-status)
+      (setf status w-status))))
+      (delete-done-job first-task)))))
 
-(defmethod pick-finished-job ((job lisp-job))
-  (with-slots (thread status result) job
+(defmethod pick-finished-task ((first-task lisp-task))
+  (with-slots (thread status result) first-task
     (unless (thread-alive-p thread)
       (setf result (join-thread thread))
-      (show-status-message job)
-      (delete-done-job job))))
+      (delete-done-job first-task))))
 
 #+sbcl
-(defmethod wait-job ((job command-job))
-  (with-slots (pgid pids status) job
-    (unless (eq *current-job* job)
+(defmethod wait-task ((first-task command-task))
+  (with-slots (pgid pids status) first-task
+    (unless (eq *current-job* first-task)
       (set-current-pgid pgid)
       (setf *current-job* job))
     (multiple-value-bind (pid status) (sb-posix:waitpid (car pids) sb-posix:wuntraced)
@@ -159,17 +143,28 @@
             (show-status-message job)))
       (setf *current-job* nil))))
 
-(defmethod wait-job ((job lisp-job))
+(defmethod wait-task ((job lisp-task))
   (with-slots (thread status result) job
-    (setf *current-job* job)
     (setf result (join-thread thread))
-    (setf status 'finished)
-    (delete-done-job job)
-    (show-status-message job))
-  (setf *current-job* nil))
+    'finished))
+
+(defun last-task (tasks)
+  (first (reverse (job-tasks job))))
+
+(defun first-task (tasks)
+  (first job))
+
+(defun wait-job (job)
+  (with-slots (status tasks) job
+    (setf *current-job* job)
+    (setf status (wait-task (last-task tasks)))
+    (when (eq status 'finished)
+      (delete-done-job job)
+      (setf *current-job* nil))
+    (show-status-message job)))
 
 #+sbcl
-(defmethod send-signal-to-job ((job command-job) sig-no)
+(defmethod send-signal-to-task ((job command-task) sig-no)
   (with-slots (pgid) job
     (sb-posix:killpg pgid sig-no)
     (let ((jobs *jobs*))
@@ -178,7 +173,7 @@
       (setf *jobs* jobs))))
 
 ;TODO need signal processing, like stopping, restart, and others
-(defmethod send-signal-to-job ((job lisp-job) sig-no)
+(defmethod send-signal-to-task ((job lisp-task) sig-no)
   (with-slots (thread) job
     (destroy-thread thread)))
 
@@ -188,35 +183,36 @@
                (eq no jobno)))
            jobno))
 
-(defmethod make-job-obj-active ((job command-job) foreground)
+(defmethod make-task-obj-active ((job command-task) foreground)
   (with-slots (status) job
     (progn
-      (send-signal-to-job job
+      (send-signal-to-task (car job)
                           sb-posix:sigcont)
       (setf status 'running)
       (if foreground
-          (wait-job job)))))
+          (wait-task job)))))
 
-(defmethod make-job-obj-active ((job lisp-job) foreground)
+(defmethod make-task-obj-active ((job lisp-task) foreground)
   (when foreground
     (with-slots (status) job
       (setf status 'running)
-      (wait-job job))))
+      (wait-task job))))
 
 (defun make-job-active (jobno foreground)
   (let ((job (if jobno (find-job-by-jobno jobno) (car *jobs*))))
     (if job
-        (make-job-obj-active job foreground)
+        (make-task-obj-active (car job) foreground)
         (format *error-output* "No such a job."))))
 
 (defun pick-finished-jobs ()
   (mapc (lambda (job)
-          (pick-finished-job job))
+          (pick-finished-task (car job))
+          (show-status-message (car (reverse job)))
         *jobs*))
 
 (defun show-jobs ()
   (mapc (lambda (job)
-          (show-status-message job))
+          (show-status-message (car (reverse job))))
         *jobs*))
 
 (defun parse-shell-to-lisp (shell-lst)
@@ -245,18 +241,21 @@
   (multiple-value-bind (trans-cmds result)
       (check-command-executable cmds)
     (when result
-      (let ((created-job nil))
-        (mapc (lambda (cmd)
-                (setf created-job
-                      (case (first cmd)
-                        (clsh.parser:lisp
-                         (create-lisp-task (cadr cmd)))
-                        (clsh.parser:shell
-                         (create-command-task (cadr cmd))))
-                      ))
-              trans-cmds)
-        (unless bg-flag
-          (wait-job created-job))))))
+      (register-job
+       (make-job
+        :no *jobno-counter*
+        :commands
+        (mapcar (lambda (cmd)
+                  (case (first cmd)
+                    (clsh.parser:lisp
+                     (create-lisp-task (cadr cmd)))
+                    (clsh.parser:shell
+                     (create-command-task (cadr cmd)))))
+                trans-cmds)
+        :status 'running
+        *jobs*)
+      (unless bg-flag
+        (wait-task (first *jobs*))))))
 
 ;; TODO 以下実装保留
 ;; (set-macro-character #\] (get-macro-character #\)))
