@@ -88,7 +88,7 @@
 (defun set-current-pgid (pgid)
   (tcsetpgrp *tty-fd* pgid))
 
-(defun run-external-command (cmd &key (grpid nil) (input 0) (output 1) (error 2))
+(defun make-proc (grpid task input output error)
   (sb-thread::with-all-threads-lock
     (let ((pid (sb-posix:posix-fork)))
       (if (eq pid 0)
@@ -110,7 +110,7 @@
             (unless (eq 2 error)
               (sb-posix:dup2 error 2))
             (close-all-fd)
-            (exec (car cmd) cmd))
+            (funcall task))
           (progn ;parent
             (unless grpid
               (setf grpid pid))
@@ -122,6 +122,14 @@
             (unless (eq 2 error)
               (sb-posix:close error))
             pid)))))
+
+(defun run-external-command (grpid cmd input output error)
+  (make-proc grpid
+             (lambda ()
+               (exec (car cmd) cmd))
+             input
+             output
+             error))
 
 (defun lookup-external-command (cmd-spec)
   (let* ((cmd (caadr cmd-spec))

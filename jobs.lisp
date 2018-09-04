@@ -1,7 +1,5 @@
-(require :bordeaux-threads)
-
 (defpackage clsh.jobs
-  (:use common-lisp alexandria clsh.external-command cffi bordeaux-threads)
+  (:use common-lisp alexandria clsh.external-command cffi)
   (:export
    create-job
    wait-job
@@ -18,21 +16,21 @@
 
 (defstruct job
   (no)
-  (tasks)
-  (pids)
-  (tids)
+  (executing-tasks)
+  (finished-tasks)
+  (pgid)
   (status))
 
-(defclass task ())
+(defclass task ()
+  ((pid :initarg :pid :accessor task-pid)
+   ))
 
 (defclass command-task (task)
   ((command :initarg :command)
-   (pid :initarg :pid)
    (status :initarg :status)))
 
 (defclass lisp-task (task)
   ((exp :initarg :exp)
-   (thread :initarg :thread)
    (result :initform nil)))
 
 (defvar *jobno-counter* 1)
@@ -60,38 +58,32 @@
         (t nil)))
 
 #+sbcl
-(defun create-command-task (cmd-array &key (input *standard-input*) (output *standard-output*) (error *error-output*))
-  (let ((fds (mapcar (lambda (fs)
-                       (get-fd-from-stream fs))
-                     `(,input ,output ,error))))
-    (if (some #'null fds)
-        nil
-        (let* ((pid (run-external-command cmd-array :input (first fds) :output (second fds) :error (third fds)))
-               (proc (make-instance
-                      'command-task
-                      :command cmd-array
-                      :pid pid)))
-          (register-job proc)
-          proc))))
+(defun create-command-task (grpid cmd-array input output error)
+  (let* ((pid (run-external-command grpid cmd-array input output error))
+         (task (make-instance
+                'command-task
+                :command cmd-array
+                :pid pid)))
+    task))
 
-(defun create-lisp-task (exp &key (input *standard-input*) (output *standard-output*) (error *error-output*))
-  (let* ((thr (make-thread (lambda ()
-                             (block eval-cmd
-                               (handler-bind
-                                   ((error (lambda (e)
-                                             (format *error-output* "~a~%" e)
-                                             #+sbcl
-                                             (sb-debug:print-backtrace)
-                                             (return-from eval-cmd))))
-                                 (eval (read-from-string exp)))))
-                           :initial-bindings `((*standard-input* . ,input)
-                                               (*standard-output* . ,output)
-                                               (*error-output* . ,error))))
+(defun create-lisp-task (grpid exp input output error)
+  (let* ((task-pid (make-proc grpid
+                              (lambda ()
+                                (block eval-cmd
+                                  (handler-bind
+                                      ((error (lambda (e)
+                                                (format *error-output* "~a~%" e)
+                                                #+sbcl
+                                                (sb-debug:print-backtrace)
+                                                (return-from eval-cmd))))
+                                    (eval (read-from-string exp)))))
+                              input
+                              output
+                              error))
          (job (make-instance
                'lisp-task
                :exp exp
-               :thread thr))))
-    (register-job job)
+               :pid task-pid)))
     job))
 
 (defun status2string (status)
@@ -102,80 +94,73 @@
      (format nil "status=~a" status))))
 
 (defun show-status-message (job)
-  (with-slots (no status tasks) job
-    (format t "[~d] ~a ~{~{~a~}~^ | ~}~a~%"
+  (with-slots (no status finished-tasks) job
+    (format t "[~d] ~a ~{~a~^ | ~}~a~%"
             no
             (status2string status)
-            tasks
+            finished-tasks
             (if (eq *current-job* job)
                 ""
                 " &"))))
 
 #+sbcl
-(defmethod pick-finished-task ((first-task command-task))
-  (with-slots (pid status) first-task
+(defmethod pick-finished-task ((task task))
+  (with-slots (pid) task
     (multiple-value-bind (w-pid w-status) (sb-posix:waitpid pid sb-posix:wnohang)
-      (sb-posix:wifexited w-status)
-      (setf status w-status))))
-      (delete-done-job first-task)))))
-
-(defmethod pick-finished-task ((first-task lisp-task))
-  (with-slots (thread status result) first-task
-    (unless (thread-alive-p thread)
-      (setf result (join-thread thread))
-      (delete-done-job first-task))))
+      (declare (ignore w-pid))
+      (sb-posix:wifexited w-status))))
 
 #+sbcl
-(defmethod wait-task ((first-task command-task))
-  (with-slots (pgid pids status) first-task
-    (unless (eq *current-job* first-task)
-      (set-current-pgid pgid)
-      (setf *current-job* job))
-    (multiple-value-bind (pid status) (sb-posix:waitpid (car pids) sb-posix:wuntraced)
-      (declare (ignore pid))
-      (clsh.external-command:set-current-pgid *clsh-pgid*)
-      (if (sb-posix:wifexited status)
-          (progn
-            (setf *last-done-job-status* status)
-            (delete-done-job job))
-          (progn
-            (setf status 'stopped)
-            (show-status-message job)))
-      (setf *current-job* nil))))
-
-(defmethod wait-task ((job lisp-task))
-  (with-slots (thread status result) job
-    (setf result (join-thread thread))
-    'finished))
+(defun wait-pgid (pgid)
+  (set-current-pgid pgid)
+  (multiple-value-bind (pid status) (sb-posix:waitpid (- pgid) sb-posix:wuntraced)
+    (declare (ignore pid))
+    (clsh.external-command:set-current-pgid *clsh-pgid*)
+    (if (sb-posix:wifexited status)
+        pgid
+        nil)))
 
 (defun last-task (tasks)
-  (first (reverse (job-tasks job))))
+  (first (reverse tasks)))
 
 (defun first-task (tasks)
-  (first job))
+  (first tasks))
+
+(defun find-task-from-pid (job pid)
+  (find-if (lambda (task)
+             (eq (task-pid task) pid))
+           (job-executing-tasks job)))
+
+(defun make-task-finished (job finished-task)
+  (with-slots (executing-tasks finished-tasks) job
+    (setf executing-tasks (delete finished-task executing-tasks))
+    (push finished-task finished-tasks)))
 
 (defun wait-job (job)
-  (with-slots (status tasks) job
+  (with-slots (status executing-tasks) job
     (setf *current-job* job)
-    (setf status (wait-task (last-task tasks)))
-    (when (eq status 'finished)
-      (delete-done-job job)
-      (setf *current-job* nil))
+    (if (loop
+           (let ((finished-pid (wait-pgid (job-pgid job))))
+             (if finished-pid
+                 (make-task-finished job (find-task-from-pid job finished-pid))
+                 (return nil))
+             (unless executing-tasks
+               (return t))))
+        (progn
+          (setf *last-done-job-status* status)
+          (delete-done-job job))
+        (setf status 'stopped))
+    (setf *current-job* nil)
     (show-status-message job)))
 
 #+sbcl
-(defmethod send-signal-to-task ((job command-task) sig-no)
+(defmethod send-signal-to-task ((job task) sig-no)
   (with-slots (pgid) job
     (sb-posix:killpg pgid sig-no)
     (let ((jobs *jobs*))
       (setf jobs (delete job jobs))
       (push job jobs)
       (setf *jobs* jobs))))
-
-;TODO need signal processing, like stopping, restart, and others
-(defmethod send-signal-to-task ((job lisp-task) sig-no)
-  (with-slots (thread) job
-    (destroy-thread thread)))
 
 (defun find-job-by-jobno (jobno)
   (find-if (lambda (job)
@@ -190,7 +175,7 @@
                           sb-posix:sigcont)
       (setf status 'running)
       (if foreground
-          (wait-task job)))))
+          (wait-job job)))))
 
 (defmethod make-task-obj-active ((job lisp-task) foreground)
   (when foreground
@@ -206,8 +191,13 @@
 
 (defun pick-finished-jobs ()
   (mapc (lambda (job)
-          (pick-finished-task (car job))
-          (show-status-message (car (reverse job)))
+          (mapc
+           (lambda (task)
+             (when (pick-finished-task task)
+               (make-task-finished job task)))
+           job)
+          (unless (job-executing-tasks job)
+            (show-status-message job)))
         *jobs*))
 
 (defun show-jobs ()
@@ -237,25 +227,35 @@
              cmds)
      executable)))
 
-(defun create-job (cmds bg-flag)
+(defun create-job (cmds bg-flag &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (multiple-value-bind (trans-cmds result)
       (check-command-executable cmds)
-    (when result
-      (register-job
-       (make-job
-        :no *jobno-counter*
-        :commands
-        (mapcar (lambda (cmd)
-                  (case (first cmd)
-                    (clsh.parser:lisp
-                     (create-lisp-task (cadr cmd)))
-                    (clsh.parser:shell
-                     (create-command-task (cadr cmd)))))
-                trans-cmds)
-        :status 'running
-        *jobs*)
-      (unless bg-flag
-        (wait-task (first *jobs*))))))
+    (let ((grpid nil))
+      (destructuring-bind (in-s out-s err-s)
+          (mapcar (lambda (fs)
+                         (get-fd-from-stream fs))
+                       `(,input ,output ,error))
+        (when result
+          (let ((job (make-job
+                      :no *jobno-counter*
+                      :executing-tasks
+                      (mapcar (lambda (cmd)
+                                (let ((task (case (first cmd)
+                                              (clsh.parser:lisp
+                                               (create-lisp-task grpid (cadr cmd) in-s out-s err-s))
+                                              (clsh.parser:shell
+                                               (create-command-task grpid (cadr cmd) in-s out-s err-s))
+                                              (otherwise
+                                               (error "invalid token")))))
+                                  (unless grpid
+                                    (setf grpid (task-pid task)))
+                                  task))
+                              trans-cmds)
+                      :status 'running)))
+            (setf (job-pgid job) grpid)
+            (register-job job)
+            (unless bg-flag
+              (wait-job job))))))))
 
 ;; TODO 以下実装保留
 ;; (set-macro-character #\] (get-macro-character #\)))
