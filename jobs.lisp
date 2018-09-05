@@ -206,7 +206,7 @@
         *jobs*))
 
 (defun parse-shell-to-lisp (shell-lst)
-  (format nil "~a" shell-lst))
+  (format nil "~s" shell-lst))
 
 (defun check-command-executable (cmds)
   (let ((executable t))
