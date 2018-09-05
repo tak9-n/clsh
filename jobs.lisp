@@ -117,7 +117,7 @@
     (declare (ignore pid))
     (clsh.external-command:set-current-pgid *clsh-pgid*)
     (if (sb-posix:wifexited status)
-        pgid
+        pid
         nil)))
 
 (defun last-task (tasks)
@@ -147,11 +147,12 @@
              (unless executing-tasks
                (return t))))
         (progn
-          (setf *last-done-job-status* status)
+          (setf status 'finished
+                *last-done-job-status* status)
           (delete-done-job job))
         (setf status 'stopped))
-    (setf *current-job* nil)
-    (show-status-message job)))
+    (show-status-message job)
+    (setf *current-job* nil)))
 
 #+sbcl
 (defmethod send-signal-to-task ((job task) sig-no)
