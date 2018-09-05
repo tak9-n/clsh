@@ -22,8 +22,7 @@
   (status))
 
 (defclass task ()
-  ((pid :initarg :pid :accessor task-pid)
-   ))
+  ((pid :initarg :pid :accessor task-pid)))
 
 (defclass command-task (task)
   ((command :initarg :command)
@@ -114,7 +113,6 @@
 (defun wait-pgid (pgid)
   (set-current-pgid pgid)
   (multiple-value-bind (pid status) (sb-posix:waitpid (- pgid) sb-posix:wuntraced)
-    (declare (ignore pid))
     (clsh.external-command:set-current-pgid *clsh-pgid*)
     (if (sb-posix:wifexited status)
         pid
@@ -132,7 +130,7 @@
            (job-executing-tasks job)))
 
 (defun make-task-finished (job finished-task)
-  (with-slots (executing-tasks finished-tasks) job
+  (with-slots (executing-tasks finished-tasks in-fd out-fd err-fd) job
     (setf executing-tasks (delete finished-task executing-tasks))
     (push finished-task finished-tasks)))
 
@@ -211,7 +209,7 @@
 
 (defun check-command-executable (cmds)
   (let ((executable t))
-    (values 
+    (values
      (mapcar (lambda (cmd)
                (case (first cmd)
                  (clsh.parser:shell
@@ -228,6 +226,10 @@
              cmds)
      executable)))
 
+#+sbcl
+(defun pipe ()
+  (sb-posix:pipe))
+
 (defun create-job (cmds bg-flag &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (multiple-value-bind (trans-cmds result)
       (check-command-executable cmds)
@@ -237,7 +239,7 @@
           (destructuring-bind (in-s out-s err-s)
               (mapcar (lambda (fs)
                         (get-fd-from-stream fs))
-                      `(,input ,output ,error))
+                      (list input output error))
             (when result
               (let ((job (make-job
                           :no *jobno-counter*
