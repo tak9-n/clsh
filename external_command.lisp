@@ -7,7 +7,8 @@
    #:lookup-external-command
    #:run-external-command
    #:set-current-pgid
-   #:build-command-hash))
+   #:build-command-hash
+   #:make-proc))
 
 (in-package clsh.external-command)
 

@@ -14,6 +14,6 @@
 (defun find-command-symbol (cmd)
   (multiple-value-bind (sym status)
       (find-symbol (string-upcase cmd) 'clsh.commands)
-    (if (eq status :external)
+    (if (not (eq status :internal))
         sym
         nil)))

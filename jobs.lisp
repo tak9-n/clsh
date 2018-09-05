@@ -206,7 +206,7 @@
         *jobs*))
 
 (defun parse-shell-to-lisp (shell-lst)
-  (format nil "~w" shell-lst))
+  (format nil "~a" shell-lst))
 
 (defun check-command-executable (cmds)
   (let ((executable t))
@@ -230,32 +230,34 @@
 (defun create-job (cmds bg-flag &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (multiple-value-bind (trans-cmds result)
       (check-command-executable cmds)
-    (let ((grpid nil))
-      (destructuring-bind (in-s out-s err-s)
-          (mapcar (lambda (fs)
-                         (get-fd-from-stream fs))
-                       `(,input ,output ,error))
-        (when result
-          (let ((job (make-job
-                      :no *jobno-counter*
-                      :executing-tasks
-                      (mapcar (lambda (cmd)
-                                (let ((task (case (first cmd)
-                                              (clsh.parser:lisp
-                                               (create-lisp-task grpid (cadr cmd) in-s out-s err-s))
-                                              (clsh.parser:shell
-                                               (create-command-task grpid (cadr cmd) in-s out-s err-s))
-                                              (otherwise
-                                               (error "invalid token")))))
-                                  (unless grpid
-                                    (setf grpid (task-pid task)))
-                                  task))
-                              trans-cmds)
-                      :status 'running)))
-            (setf (job-pgid job) grpid)
-            (register-job job)
-            (unless bg-flag
-              (wait-job job))))))))
+    (if (and (= (length trans-cmds) 1) (eq (first (first trans-cmds)) 'clsh.parser:lisp))
+        (eval (read-from-string (cadr (first trans-cmds))))
+        (let ((grpid nil))
+          (destructuring-bind (in-s out-s err-s)
+              (mapcar (lambda (fs)
+                        (get-fd-from-stream fs))
+                      `(,input ,output ,error))
+            (when result
+              (let ((job (make-job
+                          :no *jobno-counter*
+                          :executing-tasks
+                          (mapcar (lambda (cmd)
+                                    (let ((task (case (first cmd)
+                                                  (clsh.parser:lisp
+                                                   (create-lisp-task grpid (cadr cmd) in-s out-s err-s))
+                                                  (clsh.parser:shell
+                                                   (create-command-task grpid (cadr cmd) in-s out-s err-s))
+                                                  (otherwise
+                                                   (error "invalid token")))))
+                                      (unless grpid
+                                        (setf grpid (task-pid task)))
+                                      task))
+                                  trans-cmds)
+                          :status 'running)))
+                (setf (job-pgid job) grpid)
+                (register-job job)
+                (unless bg-flag
+                  (wait-job job)))))))))
 
 ;; TODO 以下実装保留
 ;; (set-macro-character #\] (get-macro-character #\)))
