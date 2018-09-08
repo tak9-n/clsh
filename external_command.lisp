@@ -113,9 +113,7 @@
               (sb-posix:dup2 output 1))
             (unless (eq 2 error)
               (sb-posix:dup2 error 2))
-            (close-all-fd)
-            (funcall task)
-            (exit))
+            (close-all-fd))
           (progn ;parent
             (unless grpid
               (setf grpid pid))
@@ -126,7 +124,10 @@
               (sb-posix:close output))
             (unless (eq 2 error)
               (sb-posix:close error))
-            pid)))))
+            (return-from make-proc pid)))))
+  ;in child
+  (funcall task)
+  (exit))
 
 (defun run-external-command (grpid cmd input output error)
   (make-proc grpid
