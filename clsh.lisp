@@ -221,10 +221,10 @@
         (cond ((and match-p end-p)
                (clsh.jobs:create-job (cdr result) (car result)))
               (match-p
-                                        ;to next line
+               (format *error-output* "incomplete command.~%") ;not support new line in the middle of command.
                )
               (t
-                                        ;error
+               (format *error-output* "command parse error.~%")
                )))
       (pick-finished-jobs))
    cmd-loop))
