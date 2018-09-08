@@ -9,10 +9,7 @@
 
 (in-package clsh.jobs)
 
-(defgeneric wait-task (job))
-(defgeneric make-task-obj-active (job foreground))
 (defgeneric pick-finished-task (job))
-(defgeneric send-signal-to-task (job sig-no))
 
 (defstruct job
   (no)
@@ -160,7 +157,7 @@
     (setf *current-job* nil)))
 
 #+sbcl
-(defmethod send-signal-to-task ((job task) sig-no)
+(defun send-signal-to-job (job sig-no)
   (with-slots (pgid) job
     (sb-posix:killpg pgid sig-no)
     (let ((jobs *jobs*))
@@ -174,25 +171,13 @@
                (eq no jobno)))
            jobno))
 
-(defmethod make-task-obj-active ((job command-task) foreground)
-  (with-slots (status) job
-    (progn
-      (send-signal-to-task (car job)
-                          sb-posix:sigcont)
-      (setf status 'running)
-      (if foreground
-          (wait-job job)))))
-
-(defmethod make-task-obj-active ((job lisp-task) foreground)
-  (when foreground
-    (with-slots (status) job
-      (setf status 'running)
-      (wait-task job))))
-
 (defun make-job-active (jobno foreground)
   (let ((job (if jobno (find-job-by-jobno jobno) (car *jobs*))))
     (if job
-        (make-task-obj-active (car job) foreground)
+        (progn
+          (send-signal-to-job job 18)
+          (when foreground
+            (wait-job job)))
         (format *error-output* "No such a job."))))
 
 (defun pick-finished-jobs ()
@@ -201,7 +186,7 @@
            (lambda (task)
              (when (pick-finished-task task)
                (make-task-finished job task)))
-           job)
+           (job-executing-tasks job))
           (unless (job-executing-tasks job)
             (show-status-message job)))
         *jobs*))
