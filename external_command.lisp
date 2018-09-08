@@ -88,6 +88,9 @@
 
 (defun set-current-pgid (pgid)
   (tcsetpgrp *tty-fd* pgid))
+#+sbcl
+(defun exit ()
+  (sb-posix:exit 0))
 
 (defun make-proc (grpid task input output error)
   (sb-thread::with-all-threads-lock
@@ -111,7 +114,8 @@
             (unless (eq 2 error)
               (sb-posix:dup2 error 2))
             (close-all-fd)
-            (funcall task))
+            (funcall task)
+            (exit))
           (progn ;parent
             (unless grpid
               (setf grpid pid))

@@ -86,9 +86,10 @@
    (=list
     (?char #\()
     (?any-whitespace)
-    (%or
-     (=subseq (%some (?not (?char #\)))))
-     '=lisp-expression/parser)
+    (%some
+     (%or
+      '=lisp-expression/parser
+      (=subseq (%some (?not (%or (?char #\() (?char #\))))))))
     (?any-whitespace)
     (?char #\))
     )))

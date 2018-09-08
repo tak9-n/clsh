@@ -65,17 +65,24 @@
                 :pid pid)))
     task))
 
+#+sbcl
+(defun eval-with-output (out-fd sexp)
+  (block eval-cmd
+    (handler-bind
+        ((error (lambda (e)
+                  (format *error-output* "~a~%" e)
+                  #+sbcl
+                  (sb-debug:print-backtrace)
+                  (return-from eval-cmd))))
+      (let ((os (sb-sys:make-fd-stream out-fd :output t))
+            (result-sexp (eval sexp)))
+        (when result-sexp
+        (format (if os t os) "~a~&" result-sexp))))))
+
 (defun create-lisp-task (grpid exp input output error)
   (let* ((task-pid (make-proc grpid
                               (lambda ()
-                                (block eval-cmd
-                                  (handler-bind
-                                      ((error (lambda (e)
-                                                (format *error-output* "~a~%" e)
-                                                #+sbcl
-                                                (sb-debug:print-backtrace)
-                                                (return-from eval-cmd))))
-                                    (eval (read-from-string exp)))))
+                                (eval-with-output output (read-from-string exp)))
                               input
                               output
                               error))
@@ -235,13 +242,13 @@
 (defun create-job (cmds bg-flag &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (multiple-value-bind (trans-cmds result)
       (check-command-executable cmds)
-    (if (and (= (length trans-cmds) 1) (eq (first (first trans-cmds)) 'clsh.parser:lisp))
-        (eval (read-from-string (cadr (first trans-cmds))))
-        (let ((grpid nil))
-          (destructuring-bind (in-s out-s err-s)
-              (mapcar (lambda (fs)
-                        (get-fd-from-stream fs))
-                      (list input output error))
+    (destructuring-bind (in-s out-s err-s)
+        (mapcar (lambda (fs)
+                  (get-fd-from-stream fs))
+                (list input output error))
+      (if (and (= (length trans-cmds) 1) (eq (first (first trans-cmds)) 'clsh.parser:lisp))
+          (eval-with-output out-s (read-from-string (cadr (first trans-cmds))))
+          (let ((grpid nil))
             (when result
               (let ((job (make-job
                           :no *jobno-counter*
@@ -264,8 +271,8 @@
                                             (create-lisp-task grpid (cadr cmd) in-fd out-fd err-s))
                                            (clsh.parser:shell
                                             (create-command-task grpid (cadr cmd) in-fd out-fd err-s))
-                                          (otherwise
-                                           (error "invalid token")))))
+                                           (otherwise
+                                            (error "invalid token")))))
                               (unless grpid
                                 (setf grpid (task-pid task)))
                               (setf before-cmd cmd)
