@@ -228,7 +228,9 @@
 
 #+sbcl
 (defun pipe ()
-  (sb-posix:pipe))
+  (multiple-value-bind (in out)
+      (sb-posix:pipe)
+    (cons in out)))
 
 (defun create-job (cmds bg-flag &key (input *standard-input*) (output *standard-output*) (error *error-output*))
   (multiple-value-bind (trans-cmds result)
@@ -244,18 +246,31 @@
               (let ((job (make-job
                           :no *jobno-counter*
                           :executing-tasks
-                          (mapcar (lambda (cmd)
-                                    (let ((task (case (first cmd)
-                                                  (clsh.parser:lisp
-                                                   (create-lisp-task grpid (cadr cmd) in-s out-s err-s))
-                                                  (clsh.parser:shell
-                                                   (create-command-task grpid (cadr cmd) in-s out-s err-s))
-                                                  (otherwise
-                                                   (error "invalid token")))))
-                                      (unless grpid
-                                        (setf grpid (task-pid task)))
-                                      task))
-                                  trans-cmds)
+                          (do ((now-cmds trans-cmds (cdr now-cmds))
+                               (before-cmd nil)
+                               (in-fd in-s)
+                               (result))
+                              ((null now-cmds) result)
+                            (let* ((after-cmd (cadr now-cmds))
+                                   (cmd (first now-cmds))
+                                   (pipe (if after-cmd
+                                             (pipe)
+                                             nil))
+                                   (out-fd (if pipe
+                                               (cdr pipe)
+                                               out-s))
+                                   (task (case (first cmd)
+                                           (clsh.parser:lisp
+                                            (create-lisp-task grpid (cadr cmd) in-fd out-fd err-s))
+                                           (clsh.parser:shell
+                                            (create-command-task grpid (cadr cmd) in-fd out-fd err-s))
+                                          (otherwise
+                                           (error "invalid token")))))
+                              (unless grpid
+                                (setf grpid (task-pid task)))
+                              (setf before-cmd cmd)
+                              (setf in-fd (car pipe))
+                              (push task result)))
                           :status 'running)))
                 (setf (job-pgid job) grpid)
                 (register-job job)
