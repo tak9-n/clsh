@@ -5,12 +5,21 @@
   (:use common-lisp
         cl-fad
         maxpc
-        maxpc.char)
+        maxpc.char
+        maxpc.input)
   (:export parse-cmdline
            parse-command-string
            lisp
-           shell))
+           shell
+           task-token-kind
+           task-token-position
+           task-token-task))
 (in-package clsh.parser)
+
+(defstruct task-token
+  kind
+  position
+  task)
 
 (defun ?some-whitespace ()
   (%some (?whitespace)))
@@ -71,15 +80,18 @@
    (=string-with-backslash)))
 
 (defun =command-as-shell ()
-  (=destructure (cmd args)
-      (=list
-       (=words)
-       (%any
-        (=destructure (_ cmd)
-            (=list
-             (?some-whitespace)
-             (=string)))))
-    `(shell ,(cons cmd args))))
+  (lambda (input)
+    (funcall 
+     (=destructure (cmd args)
+                   (=list
+                   (=words)
+                   (%any
+                    (=destructure (_ cmd)
+                                  (=list
+                                   (?some-whitespace)
+                                   (=string)))))
+                   (make-task-token :kind 'shell :position (input-position input) :task (cons cmd args)))
+    input)))
 
 (defun =lisp-expression ()
   (=subseq
@@ -97,9 +109,12 @@
 (setf (fdefinition '=lisp-expression/parser) (=lisp-expression))
 
 (defun =command-as-lisp ()
-  (=transform (=lisp-expression)
-              (lambda (exp)
-                `(lisp ,exp))))
+  (lambda (input)
+    (funcall
+     (=transform (=lisp-expression)
+                 (lambda (exp)
+                   (make-task-token :kind 'lisp :position (input-position input) :task exp)))
+     input)))
 
 (defun =command ()
   (%or (=command-as-lisp)

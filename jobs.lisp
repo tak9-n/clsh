@@ -203,17 +203,17 @@
   (let ((executable t))
     (values
      (mapcar (lambda (cmd)
-               (case (first cmd)
+               (case (clsh.parser:task-token-kind cmd)
                  (clsh.parser:shell
-                  (let ((func-sym (clsh.utils:find-command-symbol (caadr cmd))))
+                  (let ((func-sym (clsh.utils:find-command-symbol (car (clsh.parser:task-token-task cmd)))))
                     (if (fboundp func-sym)
                         (list 'clsh.parser:lisp
-                              (parse-shell-to-lisp (cons func-sym (cdadr cmd))))
-                        (if-let (it (clsh.external-command:lookup-external-command cmd))
-                          it
+                              (parse-shell-to-lisp (cons func-sym (cdr (clsh.parser:task-token-task cmd)))))
+                        (if-let (it (clsh.external-command:lookup-external-command (clsh.parser:task-token-task cmd)))
+                          (list 'clsh.parser:shell it)
                           (setf executable nil)))))
                  (otherwise
-                  cmd)
+                  (list 'clsh.parser:lisp (clsh.parser:task-token-task cmd)))
                  ))
              cmds)
      executable)))

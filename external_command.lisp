@@ -138,10 +138,10 @@
              error))
 
 (defun lookup-external-command (cmd-spec)
-  (let* ((cmd (caadr cmd-spec))
+  (let* ((cmd (car cmd-spec))
          (path-cmd (command-with-path cmd)))
     (if (and path-cmd (executable-p path-cmd))
-        (list (car cmd-spec) (cons path-cmd (cdadr cmd-spec)))
+        (cons path-cmd (cdr cmd-spec))
         (progn
           (format t "not found \"~a\" command~%" cmd)
           (return-from lookup-external-command nil)))))
