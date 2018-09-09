@@ -207,13 +207,13 @@
                  (clsh.parser:shell
                   (let ((func-sym (clsh.utils:find-command-symbol (car (clsh.parser:task-token-task cmd)))))
                     (if (fboundp func-sym)
-                        (list 'clsh.parser:lisp
+                        (cons 'clsh.parser:lisp
                               (parse-shell-to-lisp (cons func-sym (cdr (clsh.parser:task-token-task cmd)))))
                         (if-let (it (clsh.external-command:lookup-external-command (clsh.parser:task-token-task cmd)))
-                          (list 'clsh.parser:shell it)
+                          (cons 'clsh.parser:shell it)
                           (setf executable nil)))))
                  (otherwise
-                  (list 'clsh.parser:lisp (clsh.parser:task-token-task cmd)))
+                  (cons 'clsh.parser:lisp (clsh.parser:task-token-task cmd)))
                  ))
              cmds)
      executable)))
@@ -232,7 +232,7 @@
                   (get-fd-from-stream fs))
                 (list input output error))
       (if (and (= (length trans-cmds) 1) (eq (first (first trans-cmds)) 'clsh.parser:lisp))
-          (eval-with-output out-s (read-from-string (cadr (first trans-cmds))))
+          (eval-with-output out-s (read-from-string (cdr (first trans-cmds))))
           (let ((grpid nil))
             (when result
               (let ((job (make-job
@@ -253,9 +253,9 @@
                                                out-s))
                                    (task (case (first cmd)
                                            (clsh.parser:lisp
-                                            (create-lisp-task grpid (cadr cmd) in-fd out-fd err-s))
+                                            (create-lisp-task grpid (cdr cmd) in-fd out-fd err-s))
                                            (clsh.parser:shell
-                                            (create-command-task grpid (cadr cmd) in-fd out-fd err-s))
+                                            (create-command-task grpid (cdr cmd) in-fd out-fd err-s))
                                            (otherwise
                                             (error "invalid token")))))
                               (unless grpid
