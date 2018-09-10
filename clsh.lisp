@@ -216,16 +216,17 @@
         (rl:readline :prompt (funcall *prompt-function* i)
                      :add-history t
                      :novelty-check #'novelty-check))
-      (multiple-value-bind (result match-p end-p)
-          (clsh.parser:parse-cmdline text)
-        (cond ((and match-p end-p)
-               (clsh.jobs:create-job (cdr result) (car result)))
-              (match-p
-               (format *error-output* "incomplete command.~%") ;not support new line in the middle of command.
-               )
-              (t
-               (format *error-output* "command parse error.~%")
-               )))
+      (unless (ppcre:scan "^ *$" text)
+        (multiple-value-bind (result match-p end-p)
+            (clsh.parser:parse-cmdline text)
+          (cond ((and match-p end-p)
+                 (clsh.jobs:create-job (cdr result) (car result)))
+                (match-p
+                 (format *error-output* "incomplete command.~%") ;not support new line in the middle of command.
+                 )
+                (t
+                 (format *error-output* "command parse error.~%")
+                 ))))
       (pick-finished-jobs))
    cmd-loop))
 
