@@ -63,23 +63,23 @@
     task))
 
 #+sbcl
-(defun eval-with-output (out-fd sexp)
+(defun eval-with-output (out-fd exp)
   (block eval-cmd
     (handler-bind
         ((error (lambda (e)
                   (format *error-output* "~a~%" e)
-                  #+sbcl
                   (sb-debug:print-backtrace)
                   (return-from eval-cmd))))
       (let ((os (sb-sys:make-fd-stream out-fd :output t))
-            (result-sexp (eval sexp)))
-        (when result-sexp
-        (format (if os t os) "~a~&" result-sexp))))))
+            (result-sexp (eval (read-from-string exp))))
+        (if result-sexp
+            (format (if os t os) "~a~&" result-sexp)
+            (fresh-line))))))
 
 (defun create-lisp-task (grpid exp input output error)
   (let* ((task-pid (make-proc grpid
                               (lambda ()
-                                (eval-with-output output (read-from-string exp)))
+                                (eval-with-output output exp))
                               input
                               output
                               error))
@@ -232,7 +232,7 @@
                   (get-fd-from-stream fs))
                 (list input output error))
       (if (and (= (length trans-cmds) 1) (eq (first (first trans-cmds)) 'clsh.parser:lisp))
-          (eval-with-output out-s (read-from-string (cdr (first trans-cmds))))
+          (eval-with-output out-s (cdr (first trans-cmds)))
           (let ((grpid nil))
             (when result
               (let ((job (make-job

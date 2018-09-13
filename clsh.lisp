@@ -113,7 +113,7 @@
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
-    (if (< 1 (length (first (nreverse p))))
+    (if (< 1 (length (clsh.parser:task-token-task (first (nreverse p)))))
         (complete-list-filename text start end)
         (if (or (ppcre:scan "/" text) (and (not (null p))  (equal text "")))
             (complete-list-filename text start end)
@@ -172,11 +172,11 @@
            text start end :ignore-case t)))))
 
 (defun complete-cmdline (text start end)
-  (multiple-value-bind (result match-p end-p)
+  (multiple-value-bind (task-token-lst match-p end-p)
       (clsh.parser:parse-command-string rl:*line-buffer*)
     (declare (ignore match-p end-p))
-    (let ((last-sep (car (nreverse result))))
-      (if (eq (first last-sep) 'clsh.parser:lisp)
+    (let ((last-token (first (nreverse task-token-lst))))
+      (if (eq (first (clsh.parser:task-token-task last-token)) 'clsh.parser:lisp)
           (complete-list-for-lisp text start end)
           (complete-list-for-command text start end)))))
 
