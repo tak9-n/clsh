@@ -29,7 +29,8 @@
   (%or (?whitespace)
        (?newline)
        (?char #\|)
-       (?char #\&)))
+       (?char #\&)
+       (?char #\()))
 
 (defun =words ()
   (=subseq

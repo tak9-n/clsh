@@ -97,7 +97,6 @@
     (sb-int:simple-file-error ()
       nil)))
 
-;TODO ソースが汚いので要リファクタリング
 (defun complete-list-filename (text start end)
   (declare (ignore start end))
   (multiple-value-bind (orig-path abs-path comp-str)
@@ -174,9 +173,10 @@
 (defun complete-cmdline (text start end)
   (multiple-value-bind (task-token-lst match-p end-p)
       (clsh.parser:parse-command-string rl:*line-buffer*)
-    (declare (ignore match-p end-p))
+    (declare (ignore match-p))
     (let ((last-token (first (nreverse task-token-lst))))
-      (if (eq (first (clsh.parser:task-token-task last-token)) 'clsh.parser:lisp)
+      (if (or (not end-p)
+              (eq (first (clsh.parser:task-token-task last-token)) 'clsh.parser:lisp))
           (complete-list-for-lisp text start end)
           (complete-list-for-command text start end)))))
 
