@@ -193,7 +193,7 @@
 
 (defun show-jobs ()
   (mapc (lambda (job)
-          (show-status-message (car (reverse job))))
+          (show-status-message job))
         *jobs*))
 
 (defun parse-shell-to-lisp (shell-lst)
