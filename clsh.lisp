@@ -207,8 +207,13 @@
   (clsh.jobs:jobs-init)
   (clsh.parser:parser-init)
 
+  (let ((rcfile (merge-pathnames (user-homedir-pathname) #P".clshrc")))
+    (when (probe-file rcfile)
+      (load rcfile)))
+
   (read-history)
   (clsh.external-command:build-command-hash)
+
   (do ((i 0 (1+ i))
        (text ""))
       (nil)
