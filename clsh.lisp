@@ -239,6 +239,6 @@
       (pick-finished-jobs))
    cmd-loop))
 
-(in-package :common-lisp-user)
+(in-package common-lisp-user)
 (defun v (x) x)
 (export 'v)
