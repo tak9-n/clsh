@@ -1,6 +1,7 @@
 (defpackage clsh.jobs
   (:use common-lisp alexandria clsh.external-command cffi)
   (:export
+   jobs-init
    create-job
    wait-job
    make-job-active
@@ -31,10 +32,18 @@
 
 (defvar *jobno-counter* 1)
 
-(defvar *clsh-pgid* (sb-posix:getpgrp))
+(defvar *clsh-pgid*)
 (defvar *jobs* nil)
 (defvar *last-done-job-status* nil)
 (defvar *current-job* nil)
+
+#+sbcl
+(defun getpgrp ()
+  (sb-posix:getpgrp))
+
+(defun jobs-init ()
+  (setf *clsh-pgid* (getpgrp))
+  (clsh.external-command:external-command-init))
 
 (defun delete-done-job (job)
   (setf *jobs* (delete job *jobs*))

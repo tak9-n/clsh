@@ -8,6 +8,7 @@
         maxpc.char
         maxpc.input)
   (:export parse-cmdline
+           parser-init
            parse-command-string
            lisp
            shell
@@ -107,7 +108,8 @@
     (?char #\))
     )))
 
-(setf (fdefinition '=lisp-expression/parser) (=lisp-expression))
+(defun parser-init ()
+ (setf (fdefinition '=lisp-expression/parser) (=lisp-expression)))
 
 (defun =command-as-lisp ()
   (lambda (input)

@@ -20,7 +20,9 @@
 
 (in-package clsh)
 
-(defconstant +history-file+ (merge-pathnames (user-homedir-pathname) #p".clsh_history"))
+(defvar +history-file+)
+(defvar *readline-name* "clsh")
+(defvar *prompt-function*)
 
 ;;; Let's write novelty-check, so if the actual line is equal to the most
 ;;; recent history line it will not be added to the history.
@@ -180,9 +182,6 @@
           (complete-list-for-lisp text start end)
           (complete-list-for-command text start end)))))
 
-(rl:register-function :complete #'complete-cmdline)
-
-(defvar *readline-name* "clsh")
 
                                         ;TODO should send adding request to cl-readline
                                         ;no entry in cl-readline
@@ -193,16 +192,21 @@
 (defun write-history ()
   (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
 
-(defvar *prompt-function*
-  (lambda (count)
-    (declare (ignore count))
-    (format nil "~a:[~a]> "
-            (ppcre:regex-replace (concatenate 'string "^" (namestring (user-homedir-pathname)))
-                                 (concatenate 'string (sb-posix:getcwd) "/") "~/")
-            (package-name *package*))))
-
 (defun run ()
+  (setf +history-file+ (merge-pathnames (user-homedir-pathname) #p".clsh_history")
+        *prompt-function* (lambda (count)
+                            (declare (ignore count))
+                            (format nil "~a:[~a]> "
+                                    (ppcre:regex-replace (concatenate 'string "^" (namestring (user-homedir-pathname)))
+                                                         (concatenate 'string (sb-posix:getcwd) "/") "~/")
+                                    (package-name *package*))))
+  (rl:register-function :complete #'complete-cmdline)
+
   (push (lambda () (write-history)) clsh.commands:*exit-hook*)
+
+  (clsh.jobs:jobs-init)
+  (clsh.parser:parser-init)
+
   (read-history)
   (clsh.external-command:build-command-hash)
   (do ((i 0 (1+ i))
