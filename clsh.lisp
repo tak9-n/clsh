@@ -84,7 +84,7 @@
                           (directory (make-pathname :name :wild :type :wild
                                                     :directory (pathname-directory (pathname text)))
                                      :resolve-symlinks nil))))
-    (if (or (null p) (rest p) (pathname-name (first p)))
+    (if (or (null p) (rest p) (= (length p) 1))
         p
         (get-complete-list-filename (namestring (first p))))))
 
