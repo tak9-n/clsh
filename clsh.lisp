@@ -80,13 +80,17 @@
   (ppcre:scan "^/" name))
 
 (defun get-complete-list-filename (text)
-  (let ((p (remove-if-not (lambda (x) (starts-with-subseq text (namestring x)))
-                          (directory (make-pathname :name :wild :type :wild
-                                                    :directory (pathname-directory (pathname text)))
-                                     :resolve-symlinks nil))))
-    (if (or (null p) (rest p) (pathname-name (first p)))
-        p
-        (get-complete-list-filename (namestring (first p))))))
+  (if (uiop/pathname:directory-pathname-p (pathname text))
+      (let ((r (mapcar #'namestring (directory (make-pathname :name :wild :type :wild
+                                                              :directory (pathname-directory (pathname text)))))))
+        (cons text r))
+      (let ((p (remove-if-not (lambda (x) (starts-with-subseq text (namestring x)))
+                              (directory (make-pathname :name :wild :type :wild
+                                                        :directory (pathname-directory (pathname text)))
+                                         :resolve-symlinks nil))))
+        (if (or (null p) (rest p) (pathname-name (first p)))
+            p
+            (get-complete-list-filename (namestring (first p)))))))
 
 (defun described-path-to-abs (path)
   (handler-case
