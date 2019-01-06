@@ -187,57 +187,66 @@
                                         ;no entry in cl-readline
 (defun add-history (text)
   (cffi:foreign-funcall "add_history" :string text :void))
-(defun read-history ()
-  (cffi:foreign-funcall "read_history" :string (namestring +history-file+) :int))
-(defun write-history ()
-  (cffi:foreign-funcall "write_history" :string (namestring +history-file+) :int))
+(defun read-history (file)
+  (cffi:foreign-funcall "read_history" :string (namestring file) :int))
+(defun write-history (file)
+  (cffi:foreign-funcall "write_history" :string (namestring file) :int))
+
+(defconstant +dot-directory+ (merge-pathnames (user-homedir-pathname) ".clsh.d/"))
+
+(defun read-application-files ()
+  (let ((dot-directory (ensure-directories-exist +dot-directory+)))
+    (let ((init-file (probe-file (merge-pathnames dot-directory (make-pathname :name "init" :type "lisp"))))
+          (history-file (merge-pathnames dot-directory (make-pathname :name "history"))))
+      (setf +history-file+ history-file)
+      (when init-file
+        (load init-file)))))
+
+(defun default-prompt ()
+  (format nil "~a:[~a]> "
+          (ppcre:regex-replace (concatenate 'string "^" (namestring (user-homedir-pathname)))
+                               (concatenate 'string (sb-posix:getcwd) "/") "~/")
+          (package-name *package*)))
+
+(defvar *command-count* 0)
 
 (defun run ()
-  (setf +history-file+ (merge-pathnames (user-homedir-pathname) #p".clsh_history")
-        *prompt-function* (lambda (count)
-                            (declare (ignore count))
-                            (format nil "~a:[~a]> "
-                                    (ppcre:regex-replace (concatenate 'string "^" (namestring (user-homedir-pathname)))
-                                                         (concatenate 'string (sb-posix:getcwd) "/") "~/")
-                                    (package-name *package*))))
+  (read-application-files)
+  (setf *prompt-function* #'default-prompt)
   (rl:register-function :complete #'complete-cmdline)
 
-  (push (lambda () (write-history)) clsh.commands:*exit-hook*)
+  (push (lambda () (write-history +history-file+)) clsh.commands:*exit-hook*)
 
   (clsh.jobs:jobs-init)
   (clsh.parser:parser-init)
 
-  (let ((rcfile (merge-pathnames (user-homedir-pathname) #P".clshrc")))
-    (when (probe-file rcfile)
-      (load rcfile)))
-
-  (read-history)
+  (read-history +history-file+)
   (clsh.external-command:build-command-hash)
 
-  (do ((i 0 (1+ i))
-       (text ""))
-      (nil)
-    (handler-bind
-        ((sb-sys:interactive-interrupt (lambda (i)
-                                         (format *error-output* "~%~a~%" i)
-                                         (go cmd-loop))))
-      (setf text
-        (rl:readline :prompt (funcall *prompt-function* i)
-                     :add-history t
-                     :novelty-check #'novelty-check))
-      (unless (ppcre:scan "^ *$" text)
-        (multiple-value-bind (result match-p end-p)
-            (clsh.parser:parse-cmdline text)
-          (cond ((and match-p end-p)
-                 (clsh.jobs:create-job (cdr result) (car result)))
-                (match-p
-                 (format *error-output* "incomplete command.~%") ;not support new line in the middle of command.
-                 )
-                (t
-                 (format *error-output* "command parse error.~%")
-                 ))))
-      (pick-finished-jobs))
-   cmd-loop))
+  (loop 
+     (tagbody cmd-loop
+        (let ((cmd-text ""))
+          (handler-bind
+              ((sb-sys:interactive-interrupt (lambda (i)
+                                               (format *error-output* "~%~a~%" i)
+                                               (go cmd-loop))))
+            (setf cmd-text
+                  (rl:readline :prompt (funcall *prompt-function*)
+                               :add-history t
+                               :novelty-check #'novelty-check))
+            (incf *command-count*)
+            (unless (ppcre:scan "^ *$" cmd-text)
+              (multiple-value-bind (result match-p end-p)
+                  (clsh.parser:parse-cmdline cmd-text)
+                (cond ((and match-p end-p)
+                       (clsh.jobs:create-job (cdr result) (car result)))
+                      (match-p
+                       (format *error-output* "incomplete command.~%") ;not support new line in the middle of command.
+                       )
+                      (t
+                       (format *error-output* "command parse error.~%")
+                       ))))
+            (pick-finished-jobs))))))
 
 (in-package common-lisp-user)
 (defun v (x) x)
