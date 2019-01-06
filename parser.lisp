@@ -39,13 +39,16 @@
     (?not (%delimiter)))))
 
 (defun =tilda-expansion ()
-  (=destructure (_ user)
-                (=list (?char #\~) (%maybe (%and (?not (?eq #\/)) (=words))))
-                (if user
-                    (namestring
-                     (merge-pathnames-as-directory (pathname-parent-directory (user-homedir-pathname))
-                                                   (make-pathname :directory (list :relative user))))
-                    (namestring (user-homedir-pathname)))))
+  (=destructure (_ user _ after)
+      (=list (?char #\~) (%maybe (%and (?not (?eq #\/)) (=words))) (%maybe (?eq #\/)) (%maybe (=subseq (=words))))
+    (concatenate
+     'string
+     (if user
+         (namestring
+          (merge-pathnames-as-directory (pathname-parent-directory (user-homedir-pathname))
+                                        (make-pathname :directory (list :relative user))))
+         (namestring (user-homedir-pathname)))
+     after)))
 
 (defun =single-quoted-string ()
   (=destructure (_ str _)
