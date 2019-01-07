@@ -1,6 +1,7 @@
 (defpackage clsh.jobs
   (:use common-lisp alexandria clsh.external-command cffi)
   (:export
+   jobs-init
    create-job
    wait-job
    make-job-active
@@ -31,10 +32,18 @@
 
 (defvar *jobno-counter* 1)
 
-(defvar *clsh-pgid* (sb-posix:getpgrp))
+(defvar *clsh-pgid*)
 (defvar *jobs* nil)
 (defvar *last-done-job-status* nil)
 (defvar *current-job* nil)
+
+#+sbcl
+(defun getpgrp ()
+  (sb-posix:getpgrp))
+
+(defun jobs-init ()
+  (setf *clsh-pgid* (getpgrp))
+  (clsh.external-command:external-command-init))
 
 (defun delete-done-job (job)
   (setf *jobs* (delete job *jobs*))
@@ -115,9 +124,7 @@
 
 #+sbcl
 (defun wait-pgid (pgid)
-  (set-current-pgid pgid)
   (multiple-value-bind (pid status) (sb-posix:waitpid (- pgid) sb-posix:wuntraced)
-    (clsh.external-command:set-current-pgid *clsh-pgid*)
     (if (sb-posix:wifexited status)
         pid
         nil)))
@@ -141,10 +148,12 @@
 (defun wait-job (job)
   (with-slots (status executing-tasks) job
     (setf *current-job* job)
+    (set-current-pgid (job-pgid job))
     (if (loop
            (let ((finished-pid (wait-pgid (job-pgid job))))
              (if finished-pid
-                 (make-task-finished job (find-task-from-pid job finished-pid))
+                 (progn
+                   (make-task-finished job (find-task-from-pid job finished-pid)))
                  (return nil))
              (unless executing-tasks
                (return t))))
@@ -153,6 +162,7 @@
                 *last-done-job-status* status)
           (delete-done-job job))
         (setf status 'stopped))
+    (set-current-pgid *clsh-pgid*)
     (show-status-message job)
     (setf *current-job* nil)))
 
@@ -171,11 +181,15 @@
                (eq no jobno)))
            jobno))
 
+#+sbcl
+(defconstant +sigcont+ sb-posix:sigcont)
+
 (defun make-job-active (jobno foreground)
   (let ((job (if jobno (find-job-by-jobno jobno) (car *jobs*))))
     (if job
         (progn
-          (send-signal-to-job job 18)
+          (set-current-pgid (job-pgid job))
+          (send-signal-to-job job +sigcont+)
           (when foreground
             (wait-job job)))
         (format *error-output* "No such a job."))))

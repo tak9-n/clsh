@@ -3,6 +3,7 @@
         clsh.utils
         alexandria)
   (:export
+   external-command-init
    *command-list*
    #:lookup-external-command
    #:run-external-command
@@ -15,11 +16,13 @@
 (defvar *command-list* nil)
 (defvar *command-hash* nil)
 
-(sb-sys:ignore-interrupt sb-posix:sigttou)
-(sb-sys:ignore-interrupt sb-posix:sigttin)
-(sb-sys:ignore-interrupt sb-posix:sigtstp)
+(defvar *tty-fd*)
+(defun external-command-init ()
+  (sb-sys:ignore-interrupt sb-posix:sigttou)
+  (sb-sys:ignore-interrupt sb-posix:sigttin)
+  (sb-sys:ignore-interrupt sb-posix:sigtstp)
+  (setf *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr)))
 
-(defvar *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr))
 (defun exec (program args)
   (let ((c-args (cffi:foreign-alloc :string
                                     :initial-contents args
@@ -129,6 +132,16 @@
   (funcall task)
   (exit))
 
+(defun expand-command-args (args)
+  (reduce (lambda (result arg)
+            (append result
+                    (if (ppcre:scan "\\*" arg)
+                        (mapcar #'namestring (if-let (paths (directory (pathname arg)))
+                                               paths
+                                               (return-from expand-command-args arg)))
+                        (list arg))))
+          args :initial-value nil))
+
 (defun run-external-command (grpid cmd input output error)
   (make-proc grpid
              (lambda ()
@@ -139,9 +152,13 @@
 
 (defun lookup-external-command (cmd-spec)
   (let* ((cmd (car cmd-spec))
-         (path-cmd (command-with-path cmd)))
+         (path-cmd (command-with-path cmd))
+         (args (expand-command-args (cdr cmd-spec))))
+    (when (typep args 'string)
+      (format t "can't expand \"~a\"~%" args)
+      (return-from lookup-external-command nil))
     (if (and path-cmd (executable-p path-cmd))
-        (cons path-cmd (cdr cmd-spec))
+        (cons path-cmd args)
         (progn
           (format t "not found \"~a\" command~%" cmd)
           (return-from lookup-external-command nil)))))

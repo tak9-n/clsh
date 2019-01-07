@@ -1,7 +1,7 @@
 (defpackage clsh.commands
   (:use    common-lisp
            clsh.jobs)
-  (:export exit cd fg bg jobs *exit-hook*))
+  (:export exit cd fg bg jobs rehash *exit-hook*))
 
 (in-package clsh.commands)
 
@@ -32,3 +32,6 @@
   (clsh.jobs:make-job-active jobno nil))
 (defun jobs ()
   (clsh.jobs:show-jobs))
+(defun rehash ()
+  (clsh.external-command:build-command-hash)
+  nil)
