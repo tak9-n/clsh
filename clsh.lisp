@@ -76,9 +76,6 @@
                    els))))
     (select-completions comp-list)))
 
-(defun abs-path-specified-p (name)
-  (ppcre:scan "^/" name))
-
 (defun get-complete-list-filename (text)
   (if (uiop/pathname:directory-pathname-p (pathname text))
       (let ((r (mapcar #'namestring (directory (make-pathname :name :wild :type :wild
