@@ -193,7 +193,7 @@
 (defun write-history (file)
   (cffi:foreign-funcall "write_history" :string (namestring file) :int))
 
-(defconstant +dot-directory+ (merge-pathnames (user-homedir-pathname) ".clsh.d/"))
+(defconstant +dot-directory+ (merge-pathnames ".clsh.d/" (user-homedir-pathname)))
 
 (defun read-application-files ()
   (let ((dot-directory (ensure-directories-exist +dot-directory+)))
