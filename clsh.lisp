@@ -76,6 +76,13 @@
                    els))))
     (select-completions comp-list)))
 
+(defun complete-lisp-symbols (comp-list text start end &key (ignore-case nil))
+  (let ((is-first-capital (upper-case-p (char text 0))))
+    (mapcar (if is-first-capital
+                  #'string-upcase
+                  #'string-downcase)
+              (complete-by-list comp-list text start end :ignore-case ignore-case))))
+
 (defun get-complete-list-filename (text)
   (if (uiop/pathname:directory-pathname-p (pathname text))
       (let ((r (mapcar #'namestring (directory (make-pathname :name :wild :type :wild
@@ -115,11 +122,12 @@
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
-    (if (< 1 (length (clsh.parser:task-token-task (first (nreverse p)))))
-        (complete-list-filename text start end)
+    (if (or (null p)
+            (>= 1 (length (clsh.parser:task-token-task (first (nreverse p))))))
         (if (or (ppcre:scan "/" text) (and (not (null p))  (equal text "")))
             (complete-list-filename text start end)
-            (complete-by-list clsh.external-command:*command-list* text start end)))))
+            (complete-by-list clsh.external-command:*command-list* text start end))
+        (complete-list-filename text start end))))
 
 (defun all-symbol-name-list-in-package (package &key has-package-name external)
   (mapcar (lambda (p) (concatenate 'string
@@ -150,7 +158,7 @@
       (ppcre:scan "([^:]+)(:{1,2})" text)
     (declare (ignore e))
     (if (null s)
-        (let ((comp-lst (complete-by-list
+        (let ((comp-lst (complete-lisp-symbols
                          (sort-by-length
                           (nconc (all-symbol-name-list-in-package *package*)
                                  (all-package-name-list)))
@@ -160,7 +168,7 @@
               comp-lst))
         (let ((package-name (subseq text (svref sa 0) (svref ea 0)))
               (all-symbol? (= (- (svref ea 1) (svref sa 1)) 1)))
-          (complete-by-list
+          (complete-lisp-symbols
            (sort-by-length
             (let ((p (find-package (intern (string-upcase package-name) "KEYWORD"))))
               (when p
@@ -178,10 +186,12 @@
       (clsh.parser:parse-command-string rl:*line-buffer*)
     (declare (ignore match-p))
     (let ((last-token (first (nreverse task-token-lst))))
-      (if (or (not end-p)
-              (eq (first (clsh.parser:task-token-task last-token)) 'clsh.parser:lisp))
-          (complete-list-for-lisp text start end)
-          (complete-list-for-command text start end)))))
+      (if (or (null last-token)
+              (and
+               end-p
+               (not (eq (first (clsh.parser:task-token-task last-token)) 'clsh.parser:lisp))))
+          (complete-list-for-command text start end)
+          (complete-list-for-lisp text start end)))))
 
 
                                         ;TODO should send adding request to cl-readline
