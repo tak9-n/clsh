@@ -186,7 +186,7 @@
       (clsh.parser:parse-command-string rl:*line-buffer*)
     (declare (ignore match-p))
     (let ((last-token (first (nreverse task-token-lst))))
-      (if (or (null last-token)
+      (if (or (equal rl:*line-buffer* "")
               (and
                end-p
                (not (eq (first (clsh.parser:task-token-task last-token)) 'clsh.parser:lisp))))
