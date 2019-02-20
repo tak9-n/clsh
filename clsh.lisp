@@ -4,7 +4,7 @@
 
 (load #P"utils.lisp")
 (load #P"parser.lisp")
-(load #P"external_command.lisp")
+(load #P"external-command.lisp")
 (load #P"jobs.lisp")
 (load #p"commands.lisp")
 
