@@ -77,11 +77,13 @@
     (select-completions comp-list)))
 
 (defun complete-lisp-symbols (comp-list text start end &key (ignore-case nil))
-  (let ((is-first-capital (upper-case-p (char text 0))))
-    (mapcar (if is-first-capital
-                  #'string-upcase
-                  #'string-downcase)
-              (complete-by-list comp-list text start end :ignore-case ignore-case))))
+  (if (equal text "")
+      comp-list
+      (let ((is-first-capital (upper-case-p (char text 0))))
+        (mapcar (if is-first-capital
+                    #'string-upcase
+                    #'string-downcase)
+                (complete-by-list comp-list text start end :ignore-case ignore-case)))))
 
 (defun get-complete-list-filename (text)
   (if (uiop/pathname:directory-pathname-p (pathname text))
@@ -189,7 +191,7 @@
       (if (or (equal rl:*line-buffer* "")
               (and
                end-p
-               (not (eq (first (clsh.parser:task-token-task last-token)) 'clsh.parser:lisp))))
+               (not (eq (clsh.parser:task-token-kind last-token) 'clsh.parser:lisp))))
           (complete-list-for-command text start end)
           (complete-list-for-lisp text start end)))))
 
