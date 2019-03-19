@@ -1,5 +1,5 @@
-(require :maxpc)
-(require :cl-fad)
+(ql:quickload :maxpc)
+(ql:quickload :cl-fad)
 
 (defpackage clsh.parser
   (:use common-lisp

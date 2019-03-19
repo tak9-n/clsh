@@ -1,6 +1,6 @@
-(require :alexandria)
-(require :cl-readline)
-(require :cl-ppcre)
+(ql:quickload :alexandria)
+(ql:quickload :cl-readline)
+(ql:quickload :cl-ppcre)
 
 (load #P"utils.lisp")
 (load #P"parser.lisp")
@@ -74,7 +74,7 @@
                (if (cdr els)
                    (cons (common-prefix els :ignore-case ignore-case) els)
                    els))))
-    (select-completions comp-list)))
+    (select-completions (sort-by-length comp-list))))
 
 (defun complete-lisp-symbols (comp-list text start end &key (ignore-case nil))
   (if (equal text "")
@@ -128,7 +128,7 @@
             (>= 1 (length (clsh.parser:task-token-task (first (nreverse p))))))
         (if (or (ppcre:scan "/" text) (and (not (null p))  (equal text "")))
             (complete-list-filename text start end)
-            (complete-by-list clsh.external-command:*command-list* text start end))
+            (complete-by-list (append clsh.external-command:*command-list* (mapcar (lambda (x) (string-downcase (symbol-name x))) (package-external-symbols :clsh.commands))) text start end))
         (complete-list-filename text start end))))
 
 (defun all-symbol-name-list-in-package (package &key has-package-name external)
