@@ -54,18 +54,15 @@
   (let ((compare-func (if ignore-case
                           #'char-equal
                           #'char=)))
-    (subseq
-     (car items) 0
-     (position
-      nil
-      (mapcar
-       (lambda (i)
-         (every (lambda (x)
-                  (funcall compare-func
-                           (char (car items) i)
-                           (char x           i)))
-                (cdr items)))
-       (iota (reduce #'min (mapcar #'length items))))))))
+    (do ((pos 0 (1+ pos)))
+        ((or (null (cdr items))
+             (some (lambda (str)
+                     (not (funcall compare-func
+                                   (elt (car items) pos )
+                                   (elt str pos ))))
+                   (cdr items))
+             (= (1+ pos) (length (car items))))
+         (subseq (car items) 0 (1+ pos))))))
 
 (defun complete-by-list (comp-list text start end &key (ignore-case nil))
   (declare (ignore start end))
@@ -88,7 +85,8 @@
 (defun get-complete-list-filename (text)
   (if (uiop/pathname:directory-pathname-p (pathname text))
       (let ((r (mapcar #'namestring (directory (make-pathname :name :wild :type :wild
-                                                              :directory (pathname-directory (pathname text)))))))
+                                                              :directory (pathname-directory (pathname text)))
+                                               :resolve-symlinks nil))))
         (cons text r))
       (let ((p (remove-if-not (lambda (x) (starts-with-subseq text (namestring x)))
                               (directory (make-pathname :name :wild :type :wild
