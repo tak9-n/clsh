@@ -51,18 +51,19 @@
 ;;; first word, it will be completed as a verb, second and later words will
 ;;; be completed as fruits.
 (defun common-prefix (items &key (ignore-case nil))
-  (let ((compare-func (if ignore-case
+  (if (cdr items)
+      (let ((compare-func (if ignore-case
                           #'char-equal
                           #'char=)))
-    (do ((pos 0 (1+ pos)))
-        ((or (null (cdr items))
-             (some (lambda (str)
-                     (not (funcall compare-func
-                                   (elt (car items) pos )
-                                   (elt str pos ))))
-                   (cdr items))
-             (= (1+ pos) (length (car items))))
-         (subseq (car items) 0 (1+ pos))))))
+        (do ((pos 0 (1+ pos)))
+            ((or (some (lambda (str)
+                         (not (funcall compare-func
+                                       (elt (car items) pos )
+                                       (elt str pos ))))
+                       (cdr items))
+                 (= (1+ pos) (length (car items))))
+             (subseq (car items) 0 (1+ pos)))))
+      (car items)))
 
 (defun complete-by-list (comp-list text start end &key (ignore-case nil))
   (declare (ignore start end))
