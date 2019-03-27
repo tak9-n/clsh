@@ -56,13 +56,13 @@
                           #'char-equal
                           #'char=)))
         (do ((pos 0 (1+ pos)))
-            ((or (some (lambda (str)
+            ((or (= pos (length (car items)))
+                 (some (lambda (str)
                          (not (funcall compare-func
-                                       (elt (car items) pos )
-                                       (elt str pos ))))
-                       (cdr items))
-                 (= (1+ pos) (length (car items))))
-             (subseq (car items) 0 (1+ pos)))))
+                                       (elt (car items) pos)
+                                       (elt str pos))))
+                       (cdr items)))
+             (subseq (car items) 0 pos))))
       (car items)))
 
 (defun complete-by-list (comp-list text start end &key (ignore-case nil))
