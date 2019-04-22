@@ -1,5 +1,5 @@
-(require :maxpc)
-(require :cl-fad)
+(ql:quickload :maxpc)
+(ql:quickload :cl-fad)
 
 (defpackage clsh.parser
   (:use common-lisp
@@ -38,18 +38,6 @@
    (%some
     (?not (%delimiter)))))
 
-(defun =tilda-expansion ()
-  (=destructure (_ user _ after)
-      (=list (?char #\~) (%maybe (%and (?not (?eq #\/)) (=words))) (%maybe (?eq #\/)) (%maybe (=subseq (=words))))
-    (concatenate
-     'string
-     (if user
-         (namestring
-          (merge-pathnames-as-directory (pathname-parent-directory (user-homedir-pathname))
-                                        (make-pathname :directory (list :relative user))))
-         (namestring (user-homedir-pathname)))
-     after)))
-
 (defun =single-quoted-string ()
   (=destructure (_ str _)
                 (=list
@@ -66,36 +54,46 @@
                  (?char #\"))
                 str))
 
-(defun =string-with-backslash ()
-  (=subseq
+(defun =strings-with-globing ()
+  (=transform
    (%some
     (%or
      (=destructure (_ letter)
          (=list
           (?eq #\\)
           (=element))
-       letter)
-     (=words)))))
+         letter)
+     (=words)))
+   (lambda (x)
+     (handler-case
+         (let ((globbed-path (directory (car x))))
+           (if globbed-path
+               (mapcar #'namestring globbed-path)
+               x))
+       (error (c)
+         (declare (ignore c))
+         x)))))
 
 (defun =string ()
   (%or
    (=single-quoted-string)
-   (=double-quoted-string)
-   (=tilda-expansion)
-   (=string-with-backslash)))
+   (=double-quoted-string)))
 
 (defun =command-as-shell ()
   (lambda (input)
     (funcall 
      (=destructure (cmd args)
                    (=list
-                   (=words)
-                   (%any
-                    (=destructure (_ cmd)
-                                  (=list
-                                   (?some-whitespace)
-                                   (=string)))))
-                   (make-task-token :kind 'shell :position (input-position input) :task (cons cmd args)))
+                    (=words)
+                    (%any
+                     (=destructure (_ arg)
+                                   (=list
+                                    (?some-whitespace)
+                                    (%or 
+                                     (=string)
+                                     (=strings-with-globing)))
+                                   arg)))
+                   (make-task-token :kind 'shell :position (input-position input) :task (cons cmd (alexandria:flatten args))))
     input)))
 
 (defun =lisp-expression ()

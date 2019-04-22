@@ -125,7 +125,7 @@
 #+sbcl
 (defun wait-pgid (pgid)
   (multiple-value-bind (pid status) (sb-posix:waitpid (- pgid) sb-posix:wuntraced)
-    (if (sb-posix:wifexited status)
+    (if (not (sb-posix:wifstopped status))
         pid
         nil)))
 

@@ -21,6 +21,8 @@
   (sb-sys:ignore-interrupt sb-posix:sigttou)
   (sb-sys:ignore-interrupt sb-posix:sigttin)
   (sb-sys:ignore-interrupt sb-posix:sigtstp)
+  (sb-sys:enable-interrupt sb-posix:sigchld (lambda (signo info context)
+                                              (declare (ignore signo info context))))
   (setf *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr)))
 
 (defun exec (program args)

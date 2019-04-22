@@ -1,10 +1,10 @@
-(require :alexandria)
-(require :cl-readline)
-(require :cl-ppcre)
+(ql:quickload :alexandria)
+(ql:quickload :cl-readline)
+(ql:quickload :cl-ppcre)
 
 (load #P"utils.lisp")
 (load #P"parser.lisp")
-(load #P"external_command.lisp")
+(load #P"external-command.lisp")
 (load #P"jobs.lisp")
 (load #p"commands.lisp")
 
@@ -51,21 +51,19 @@
 ;;; first word, it will be completed as a verb, second and later words will
 ;;; be completed as fruits.
 (defun common-prefix (items &key (ignore-case nil))
-  (let ((compare-func (if ignore-case
+  (if (cdr items)
+      (let ((compare-func (if ignore-case
                           #'char-equal
                           #'char=)))
-    (subseq
-     (car items) 0
-     (position
-      nil
-      (mapcar
-       (lambda (i)
-         (every (lambda (x)
-                  (funcall compare-func
-                           (char (car items) i)
-                           (char x           i)))
-                (cdr items)))
-       (iota (reduce #'min (mapcar #'length items))))))))
+        (do ((pos 0 (1+ pos)))
+            ((or (= pos (length (car items)))
+                 (some (lambda (str)
+                         (not (funcall compare-func
+                                       (elt (car items) pos)
+                                       (elt str pos))))
+                       (cdr items)))
+             (subseq (car items) 0 pos))))
+      (car items)))
 
 (defun complete-by-list (comp-list text start end &key (ignore-case nil))
   (declare (ignore start end))
@@ -74,15 +72,22 @@
                (if (cdr els)
                    (cons (common-prefix els :ignore-case ignore-case) els)
                    els))))
-    (select-completions comp-list)))
+    (select-completions (sort-by-length comp-list))))
 
-(defun abs-path-specified-p (name)
-  (ppcre:scan "^/" name))
+(defun complete-lisp-symbols (comp-list text start end &key (ignore-case nil))
+  (if (equal text "")
+      comp-list
+      (let ((is-first-capital (upper-case-p (char text 0))))
+        (mapcar (if is-first-capital
+                    #'string-upcase
+                    #'string-downcase)
+                (complete-by-list comp-list text start end :ignore-case ignore-case)))))
 
 (defun get-complete-list-filename (text)
   (if (uiop/pathname:directory-pathname-p (pathname text))
       (let ((r (mapcar #'namestring (directory (make-pathname :name :wild :type :wild
-                                                              :directory (pathname-directory (pathname text)))))))
+                                                              :directory (pathname-directory (pathname text)))
+                                               :resolve-symlinks nil))))
         (cons text r))
       (let ((p (remove-if-not (lambda (x) (starts-with-subseq text (namestring x)))
                               (directory (make-pathname :name :wild :type :wild
@@ -118,11 +123,12 @@
 
 (defun complete-list-for-command (text start end)
   (let ((p (clsh.parser:parse-command-string rl:*line-buffer*)))
-    (if (< 1 (length (clsh.parser:task-token-task (first (nreverse p)))))
-        (complete-list-filename text start end)
+    (if (or (null p)
+            (>= 1 (length (clsh.parser:task-token-task (first (nreverse p))))))
         (if (or (ppcre:scan "/" text) (and (not (null p))  (equal text "")))
             (complete-list-filename text start end)
-            (complete-by-list clsh.external-command:*command-list* text start end)))))
+            (complete-by-list (append clsh.external-command:*command-list* (mapcar (lambda (x) (string-downcase (symbol-name x))) (package-external-symbols :clsh.commands))) text start end))
+        (complete-list-filename text start end))))
 
 (defun all-symbol-name-list-in-package (package &key has-package-name external)
   (mapcar (lambda (p) (concatenate 'string
@@ -153,7 +159,7 @@
       (ppcre:scan "([^:]+)(:{1,2})" text)
     (declare (ignore e))
     (if (null s)
-        (let ((comp-lst (complete-by-list
+        (let ((comp-lst (complete-lisp-symbols
                          (sort-by-length
                           (nconc (all-symbol-name-list-in-package *package*)
                                  (all-package-name-list)))
@@ -163,7 +169,7 @@
               comp-lst))
         (let ((package-name (subseq text (svref sa 0) (svref ea 0)))
               (all-symbol? (= (- (svref ea 1) (svref sa 1)) 1)))
-          (complete-by-list
+          (complete-lisp-symbols
            (sort-by-length
             (let ((p (find-package (intern (string-upcase package-name) "KEYWORD"))))
               (when p
@@ -181,10 +187,12 @@
       (clsh.parser:parse-command-string rl:*line-buffer*)
     (declare (ignore match-p))
     (let ((last-token (first (nreverse task-token-lst))))
-      (if (or (not end-p)
-              (eq (first (clsh.parser:task-token-task last-token)) 'clsh.parser:lisp))
-          (complete-list-for-lisp text start end)
-          (complete-list-for-command text start end)))))
+      (if (or (equal rl:*line-buffer* "")
+              (and
+               end-p
+               (not (eq (clsh.parser:task-token-kind last-token) 'clsh.parser:lisp))))
+          (complete-list-for-command text start end)
+          (complete-list-for-lisp text start end)))))
 
 
                                         ;TODO should send adding request to cl-readline
@@ -196,7 +204,7 @@
 (defun write-history (file)
   (cffi:foreign-funcall "write_history" :string (namestring file) :int))
 
-(defconstant +dot-directory+ (merge-pathnames (user-homedir-pathname) ".clsh.d/"))
+(defconstant +dot-directory+ (merge-pathnames ".clsh.d/" (user-homedir-pathname)))
 
 (defun read-application-files ()
   (let ((dot-directory (ensure-directories-exist +dot-directory+)))
@@ -254,4 +262,24 @@
 
 (in-package common-lisp-user)
 (defun v (x) x)
+
+(defun read-stream (&optional (input-stream *standard-input*))
+  (let* ((read-buf-length 512)
+         (buf (make-string read-buf-length))
+         (result ""))
+    (loop
+         (let ((read-len (read-sequence buf input-stream)))
+           (if (< read-len read-buf-length)
+               (progn ;last reading
+                 (setf result (concatenate 'string result (subseq buf 0 read-len)))
+                 (return result))
+               (setf result (concatenate 'string result buf));reading with continueing
+               )))))
+
+(defun read-lines-as-array (&optional (input-stream *standard-input*))
+  (do ((result nil)
+       (line (read-line input-stream nil 'eof nil) (read-line input-stream nil 'eof nil)))
+      ((eq 'eof line) result)
+    (push line result)))
+
 (export 'v)
