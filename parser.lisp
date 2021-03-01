@@ -50,7 +50,28 @@
   (=destructure (_ str _)
                 (=list
                  (?char #\")
-                 (=subseq (%any (?not (?char #\"))))
+                 (=transform
+                  (=list (%any
+                          (%or (=destructure (_ c)
+                                             (=list
+                                              (?eq #\\)
+                                              (=element))
+                                 (case c
+                                   (#\n #\newline)
+                                   (otherwise c)))
+                               (%and (?not (?char #\")) (=element)))))
+                  (lambda (x)
+                    (map 'string (lambda (c) c) (first x))))
+                 (?char #\"))
+                str))
+
+(defun =double-quoted-string-for-lisp ()
+  (=destructure (_ str _)
+                (=list
+                 (?char #\")
+                 (=subseq (%any (%or
+                                 (%and (?char #\\) (?char #\"))
+                                 (?not (?char #\")))))
                  (?char #\"))
                 str))
 
@@ -105,7 +126,7 @@
      (%or
       (?some-whitespace)
       '=lisp-expression/parser
-      (=double-quoted-string)
+      (=double-quoted-string-for-lisp)
       (=subseq (%some (?not (%or (?char #\() (?char #\)) (?char #\ )))))))
     (?any-whitespace)
     (?char #\))
