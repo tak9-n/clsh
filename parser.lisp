@@ -65,14 +65,14 @@
                  (?char #\"))
                 str))
 
-(defun =double-quoted-string-for-lisp ()
+(defun =double-quoted-string-for-lisp (delimiter)
   (=destructure (_ str _)
                 (=list
-                 (?char #\")
+                 (?char delimiter)
                  (=subseq (%any (%or
-                                 (%and (?char #\\) (?char #\"))
-                                 (?not (?char #\")))))
-                 (?char #\"))
+                                 (%and (?char #\\) (?char delimiter))
+                                 (?not (?char delimiter)))))
+                 (?char delimiter))
                 str))
 
 (defun =strings-with-globing ()
@@ -126,7 +126,8 @@
      (%or
       (?some-whitespace)
       '=lisp-expression/parser
-      (=double-quoted-string-for-lisp)
+      (=double-quoted-string-for-lisp #\")
+      (=double-quoted-string-for-lisp #\|)
       (=subseq (%some (?not (%or (?char #\() (?char #\)) (?char #\ )))))))
     (?any-whitespace)
     (?char #\))
