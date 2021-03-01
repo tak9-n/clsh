@@ -262,4 +262,24 @@
 
 (in-package common-lisp-user)
 (defun v (x) x)
+
+(defun read-stream (&optional (input-stream *standard-input*))
+  (let* ((read-buf-length 512)
+         (buf (make-string read-buf-length))
+         (result ""))
+    (loop
+         (let ((read-len (read-sequence buf input-stream)))
+           (if (< read-len read-buf-length)
+               (progn ;last reading
+                 (setf result (concatenate 'string result (subseq buf 0 read-len)))
+                 (return result))
+               (setf result (concatenate 'string result buf));reading with continueing
+               )))))
+
+(defun read-lines-as-array (&optional (input-stream *standard-input*))
+  (do ((result nil)
+       (line (read-line input-stream nil 'eof nil) (read-line input-stream nil 'eof nil)))
+      ((eq 'eof line) result)
+    (push line result)))
+
 (export 'v)
