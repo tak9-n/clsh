@@ -103,8 +103,10 @@
     (?any-whitespace)
     (%some
      (%or
+      (?some-whitespace)
       '=lisp-expression/parser
-      (=subseq (%some (?not (%or (?char #\() (?char #\))))))))
+      (=double-quoted-string)
+      (=subseq (%some (?not (%or (?char #\() (?char #\)) (?char #\ )))))))
     (?any-whitespace)
     (?char #\))
     )))

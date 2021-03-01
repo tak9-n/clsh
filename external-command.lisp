@@ -18,9 +18,9 @@
 
 (defvar *tty-fd*)
 (defun external-command-init ()
-  (sb-sys:ignore-interrupt sb-posix:sigttou)
-  (sb-sys:ignore-interrupt sb-posix:sigttin)
-  (sb-sys:ignore-interrupt sb-posix:sigtstp)
+  (sb-sys:enable-interrupt sb-posix:sigttou :ignore)
+  (sb-sys:enable-interrupt sb-posix:sigttin :ignore)
+  (sb-sys:enable-interrupt sb-posix:sigtstp :ignore)
   (sb-sys:enable-interrupt sb-posix:sigchld (lambda (signo info context)
                                               (declare (ignore signo info context))))
   (setf *tty-fd* (sb-posix:open #p"/dev/tty" sb-posix:o-rdwr)))
@@ -98,39 +98,38 @@
   (sb-posix:exit 0))
 
 (defun make-proc (grpid task input output error)
-  (sb-thread::with-all-threads-lock
-    (let ((pid (sb-posix:posix-fork)))
-      (if (eq pid 0)
-          (progn ;child
-            #+darwin
-            (sb-posix:darwin-reinit)
-            (if grpid
-                (sb-posix:setpgid 0 grpid)
-                (progn
-                  (sb-posix:setpgrp)
-                  (set-current-pgid pid)))
-            (sb-sys:default-interrupt sb-posix:sigtstp)
-            (sb-sys:default-interrupt sb-posix:sigttou)
-            (sb-sys:default-interrupt sb-posix:sigttin)
-            (unless (eq 0 input)
-              (sb-posix:dup2 input 0))
-            (unless (eq 1 output)
-              (sb-posix:dup2 output 1))
-            (unless (eq 2 error)
-              (sb-posix:dup2 error 2))
-            (close-all-fd))
-          (progn ;parent
-            (unless grpid
-              (setf grpid pid))
-            (sb-posix:setpgid pid grpid)
-            (unless (eq 0 input)
-              (sb-posix:close input))
-            (unless (eq 1 output)
-              (sb-posix:close output))
-            (unless (eq 2 error)
-              (sb-posix:close error))
-            (return-from make-proc pid)))))
-  ;in child
+  (let ((pid (sb-posix:posix-fork)))
+    (if (eq pid 0)
+        (progn ;child
+          #+darwin
+          (sb-posix:darwin-reinit)
+          (if grpid
+              (sb-posix:setpgid 0 grpid)
+              (progn
+                (sb-posix:setpgrp)
+                (set-current-pgid pid)))
+          (sb-sys:enable-interrupt sb-posix:sigtstp :default)
+          (sb-sys:enable-interrupt sb-posix:sigttou :default)
+          (sb-sys:enable-interrupt sb-posix:sigttin :default)
+          (unless (eq 0 input)
+            (sb-posix:dup2 input 0))
+          (unless (eq 1 output)
+            (sb-posix:dup2 output 1))
+          (unless (eq 2 error)
+            (sb-posix:dup2 error 2))
+          (close-all-fd))
+        (progn ;parent
+          (unless grpid
+            (setf grpid pid))
+          (sb-posix:setpgid pid grpid)
+          (unless (eq 0 input)
+            (sb-posix:close input))
+          (unless (eq 1 output)
+            (sb-posix:close output))
+          (unless (eq 2 error)
+            (sb-posix:close error))
+          (return-from make-proc pid))))
+                                        ;in child
   (funcall task)
   (exit))
 
