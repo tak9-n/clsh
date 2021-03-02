@@ -101,6 +101,13 @@
   (let ((pid (sb-posix:posix-fork)))
     (if (eq pid 0)
         (progn ;child
+          (unless (eq 0 input)
+            (sb-posix:dup2 input 0))
+          (unless (eq 1 output)
+            (sb-posix:dup2 output 1))
+          (unless (eq 2 error)
+            (sb-posix:dup2 error 2))
+          (close-all-fd)
           #+darwin
           (sb-posix:darwin-reinit)
           (if grpid
@@ -111,13 +118,7 @@
           (sb-sys:enable-interrupt sb-posix:sigtstp :default)
           (sb-sys:enable-interrupt sb-posix:sigttou :default)
           (sb-sys:enable-interrupt sb-posix:sigttin :default)
-          (unless (eq 0 input)
-            (sb-posix:dup2 input 0))
-          (unless (eq 1 output)
-            (sb-posix:dup2 output 1))
-          (unless (eq 2 error)
-            (sb-posix:dup2 error 2))
-          (close-all-fd))
+          (sb-sys:enable-interrupt sb-posix:sigint :default))
         (progn ;parent
           (unless grpid
             (setf grpid pid))
@@ -131,7 +132,7 @@
           (return-from make-proc pid))))
                                         ;in child
   (funcall task)
-  (exit))
+  (sb-posix:exit 0))
 
 (defun expand-command-args (args)
   (reduce (lambda (result arg)
