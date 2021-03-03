@@ -252,9 +252,9 @@
               (let ((job (make-job
                           :no *jobno-counter*
                           :executing-tasks
-                          (do ((now-cmds trans-cmds (cdr now-cmds))
+                          (do ((now-cmds (reverse trans-cmds) (cdr now-cmds))
                                (before-cmd nil)
-                               (in-fd in-s)
+                               (out-fd out-s)
                                (result))
                               ((null now-cmds) result)
                             (let* ((after-cmd (cadr now-cmds))
@@ -262,9 +262,9 @@
                                    (pipe (if after-cmd
                                              (pipe)
                                              nil))
-                                   (out-fd (if pipe
-                                               (cdr pipe)
-                                               out-s))
+                                   (in-fd (if pipe
+                                               (car pipe)
+                                               in-s))
                                    (task (case (first cmd)
                                            (clsh.parser:lisp
                                             (create-lisp-task grpid (cdr cmd) in-fd out-fd err-s))
@@ -275,7 +275,7 @@
                               (unless grpid
                                 (setf grpid (task-pid task)))
                               (setf before-cmd cmd)
-                              (setf in-fd (car pipe))
+                              (setf out-fd (cdr pipe))
                               (push task result)))
                           :status 'running)))
                 (setf (job-pgid job) grpid)
